@@ -1,11 +1,18 @@
+mod auth;
 mod database;
-use database::{connect_db, make_user, user::User};
+
+use auth::hash::{compare_password, hash_str};
+use database::{
+    connect_db, make_user,
+    user::{self, User},
+};
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
-    http::Status,
-    response::status::Custom,
+    http::{hyper::Response, ContentType, Cookie, CookieJar, Status},
+    response::status::{BadRequest, Created, Custom},
     serde::{json::Json, Deserialize, Serialize},
+    time::Duration,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -140,12 +147,9 @@ async fn validate_password(password: &str) -> ValidField {
     }
 }
 
-//TODO: add tokio
-
 #[post("/user/create", format = "application/json", data = "<form_data>")]
-async fn create_user(form_data: Json<User>) -> Custom<&'static str> {
-    dotenv().ok();
-    let data: User = form_data.into_inner();
+async fn create_user(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let mut data: User = form_data.into_inner();
 
     let res = validate_user_name(&data.user_name).await;
     if !res.valid {
@@ -167,20 +171,37 @@ async fn create_user(form_data: Json<User>) -> Custom<&'static str> {
         return Custom(Status::BadRequest, res.message);
     }
 
+    match hash_str(&data.password).await {
+        Ok(s) => {
+            data.password = s;
+        }
+        Err(..) => {
+            return Custom(Status::InternalServerError, "Internal server error");
+        }
+    }
+
     let pool = connect_db().await;
 
     match make_user(data, pool).await {
-        Ok(_) => Custom(Status::Ok, "user created"),
-        Err(s) => Custom(Status::InternalServerError, s),
+        Ok(..) => {
+            let mut auth_cookie = Cookie::new("auth_key", "👍");
+            auth_cookie.set_http_only(true);
+            //auth_cookie.set_expires(Duration::weeks(1));
+            cookies.add_private(auth_cookie);
+            Custom(Status::Created, "User created")
+        }
+        Err(e) => Custom(Status::InternalServerError, e),
     }
 }
 
 #[post("/user/login", format = "json", data = "<form_data>")]
-fn login_user(form_data: Json<LoginData>) -> Custom<&'static str> {
+fn login_user(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
     todo!();
 }
 
 #[launch]
 async fn rocket() -> _ {
+    //TODO: move back to each routes in case the db conn breaks
+    dotenv().ok();
     rocket::build().mount("/", routes![create_user, login_user])
 }
