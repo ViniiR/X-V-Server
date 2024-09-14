@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 dotenv = "0.15.0"
+jsonwebtoken = "9.3.0"
 rand = "0.8.5"
 regex = "1.10.6"
 rocket = {version="0.5.1", features = ["json", "secrets"]}

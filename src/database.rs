@@ -1,5 +1,6 @@
 use std::env::var;
 
+use rocket::{http::Status, response::status::Custom};
 use sqlx::{postgres::PgPoolOptions, query, Pool, Postgres};
 use user::User;
 
@@ -34,12 +35,12 @@ async fn email_exists(user: &User, pool: &Pool<Postgres>) -> bool {
     }
 }
 
-pub async fn make_user(user: User, pool: Pool<Postgres>) -> Result<(), &'static str> {
+pub async fn make_user(user: User, pool: Pool<Postgres>) -> Result<(), Custom<&'static str>> {
     if user_exists(&user, &pool).await {
-        return Err("User already exists.");
+        return Err(Custom(Status::BadRequest, "Username already in use"));
     }
     if email_exists(&user, &pool).await {
-        return Err("Email already in use.");
+        return Err(Custom(Status::BadRequest, "Email already in use"));
     }
 
     let result = query!(
@@ -54,6 +55,6 @@ pub async fn make_user(user: User, pool: Pool<Postgres>) -> Result<(), &'static 
 
     match result {
         Ok(..) => Ok(()),
-        Err(..) => Err("Internal error"),
+        Err(..) => Err(Custom(Status::InternalServerError, "Internal server error")),
     }
 }
