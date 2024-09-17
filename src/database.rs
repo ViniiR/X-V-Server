@@ -4,6 +4,8 @@ use rocket::{http::Status, response::status::Custom};
 use sqlx::{postgres::PgPoolOptions, query, Pool, Postgres};
 use user::User;
 
+use crate::auth::hash::compare_password;
+
 pub mod user;
 
 pub async fn connect_db() -> Pool<Postgres> {
@@ -15,8 +17,8 @@ pub async fn connect_db() -> Pool<Postgres> {
         .expect("unable to connect to database")
 }
 
-async fn user_exists(user: &User, pool: &Pool<Postgres>) -> bool {
-    match query!("SELECT FROM users WHERE userat = $1", user.user_at)
+pub async fn user_exists(user_at: &str, pool: &Pool<Postgres>) -> bool {
+    match query!("SELECT FROM users WHERE userat = $1", user_at)
         .fetch_one(pool)
         .await
     {
@@ -25,8 +27,8 @@ async fn user_exists(user: &User, pool: &Pool<Postgres>) -> bool {
     }
 }
 
-async fn email_exists(user: &User, pool: &Pool<Postgres>) -> bool {
-    match query!("SELECT FROM users WHERE email = $1", user.email)
+pub async fn email_exists(email: &str, pool: &Pool<Postgres>) -> bool {
+    match query!("SELECT FROM users WHERE email = $1", email)
         .fetch_one(pool)
         .await
     {
@@ -35,11 +37,24 @@ async fn email_exists(user: &User, pool: &Pool<Postgres>) -> bool {
     }
 }
 
-pub async fn make_user(user: User, pool: Pool<Postgres>) -> Result<(), Custom<&'static str>> {
-    if user_exists(&user, &pool).await {
+pub async fn verify_password(email: &str, password: &str, pool: &Pool<Postgres>) -> bool {
+    match query!("SELECT password FROM users where email = $1", email)
+        .fetch_one(pool)
+        .await
+    {
+        Ok(record) => {
+            let p: String = record.password.unwrap_or(String::new());
+            compare_password(password, &p).await
+        }
+        Err(..) => false,
+    }
+}
+
+pub async fn make_user(user: &User, pool: &Pool<Postgres>) -> Result<(), Custom<&'static str>> {
+    if user_exists(&user.user_at, &pool).await {
         return Err(Custom(Status::BadRequest, "Username already in use"));
     }
-    if email_exists(&user, &pool).await {
+    if email_exists(&user.email, &pool).await {
         return Err(Custom(Status::BadRequest, "Email already in use"));
     }
 
@@ -50,7 +65,7 @@ pub async fn make_user(user: User, pool: Pool<Postgres>) -> Result<(), Custom<&'
         user.email,
         user.password
     )
-    .execute(&pool)
+    .execute(pool)
     .await;
 
     match result {

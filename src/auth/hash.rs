@@ -16,7 +16,7 @@ pub async fn hash_str(str: &str) -> Result<String, ()> {
 
 pub async fn compare_password(password: &str, hash: &str) -> bool {
     match verify_encoded(hash, password.as_bytes()) {
-        Ok(..) => true,
+        Ok(t) => t,
         Err(..) => false,
     }
 }

@@ -1,17 +1,15 @@
 mod auth;
+mod cors;
 mod database;
 
-use auth::hash::{compare_password, hash_str};
-use database::{connect_db, make_user, user::User};
-use dotenv::{dotenv, vars};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use rand::{Rng, RngCore};
+use auth::{create_jwt, hash::hash_str, validate_jwt};
+use database::{connect_db, email_exists, make_user, user::User, verify_password};
+use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
-    http::{Cookie, CookieJar, Status},
-    response::status::{BadRequest, Created, Custom},
+    http::{Cookie, CookieJar, SameSite, Status},
+    response::status::{Custom, NoContent},
     serde::{json::Json, Deserialize, Serialize},
-    time::{Duration, OffsetDateTime},
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -127,7 +125,7 @@ async fn validate_password(password: &str) -> ValidField {
     let password = password.trim();
 
     password.chars().for_each(|c| {
-        if !c.is_numeric() && !c.is_ascii() {
+        if !c.is_alphanumeric() {
             is_valid = false;
             message = "password invalid character";
         }
@@ -149,34 +147,40 @@ async fn validate_password(password: &str) -> ValidField {
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     sub: String,
-    company: String,
     exp: usize,
+}
+
+async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom<&'static str>> {
+    let res = validate_user_name(&user.user_name).await;
+    if !res.valid {
+        return Err(Custom(Status::BadRequest, res.message));
+    }
+
+    let res = validate_user_at(&user.user_at).await;
+    if !res.valid {
+        return Err(Custom(Status::BadRequest, res.message));
+    }
+
+    let res = validate_email(&user.email).await;
+    if !res.valid {
+        return Err(Custom(Status::BadRequest, res.message));
+    }
+
+    let res = validate_password(&user.password).await;
+    if !res.valid {
+        return Err(Custom(Status::BadRequest, res.message));
+    }
+
+    Ok(())
 }
 
 #[post("/user/create", format = "application/json", data = "<form_data>")]
 async fn create_user(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let mut data: User = form_data.into_inner();
 
-    let res = validate_user_name(&data.user_name).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
+    if let Err(e) = validate_minimal_user_credentials(&data).await {
+        return e;
     }
-
-    let res = validate_user_at(&data.user_at).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
-    }
-
-    let res = validate_email(&data.email).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
-    }
-
-    let res = validate_password(&data.password).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
-    }
-
     match hash_str(&data.password).await {
         Ok(s) => {
             data.password = s;
@@ -188,76 +192,74 @@ async fn create_user(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&
 
     let pool = connect_db().await;
 
-    match make_user(data, pool).await {
-        Ok(..) => {
-            let mut exp = OffsetDateTime::now_utc();
-            exp += Duration::weeks(1);
-            let exp = usize::try_from(exp.unix_timestamp()).expect("unable to unwrap UNIX epoch");
-            let claims = Claims {
-                sub: "?".to_string(),
-                company: "?".to_string(),
-                exp,
-            };
-
-            let jwt_secret = dotenv::var("SECRET_JWT_KEY").expect("SECRET_JWT_KEY not found");
-
-            match encode::<Claims>(
-                &Header::default(),
-                &claims,
-                &EncodingKey::from_secret(&jwt_secret.as_ref()),
-            ) {
-                Ok(t) => {
-                    let mut auth_cookie = Cookie::new("auth_key", t);
-
-                    auth_cookie.set_http_only(true);
-                    let mut now = OffsetDateTime::now_utc();
-                    now += Duration::weeks(1);
-
-                    auth_cookie.set_expires(now);
-                    dbg!(&auth_cookie);
-                    cookies.add_private(auth_cookie);
-
-                    Custom(Status::Created, "User created")
-                }
-                Err(..) => Custom(Status::InternalServerError, "InternalServerError"),
+    match make_user(&data, &pool).await {
+        Ok(..) => match create_jwt(&data.email).await {
+            Ok(c) => {
+                cookies.add_private(c);
+                Custom(Status::Created, "User created")
             }
+            Err(e) => e,
+        },
+        Err(e) => e,
+    }
+}
+
+#[post("/user/login", format = "application/json", data = "<form_data>")]
+async fn login_user(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let data: LoginData = form_data.into_inner();
+
+    let res = validate_email(&data.email).await;
+    if !res.valid {
+        return Custom(Status::BadRequest, res.message);
+    }
+
+    let res = validate_password(&data.password).await;
+    if !res.valid {
+        return Custom(Status::BadRequest, res.message);
+    }
+
+    let pool = connect_db().await;
+
+    if !email_exists(&data.email, &pool).await
+        || !verify_password(&data.email, &data.password, &pool).await
+    {
+        return Custom(Status::BadRequest, "Invalid credentials");
+    }
+
+    match create_jwt(&data.email).await {
+        Ok(c) => {
+            cookies.add_private(c);
+            Custom(Status::Ok, "Ok")
         }
         Err(e) => e,
     }
 }
 
-#[post("/user/login", format = "json", data = "<form_data>")]
-fn login_user(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let jwt = cookies.get_private("auth_key");
-    match jwt {
-        Some(..) => {}
-        None => {
-            return Custom(Status::Forbidden, "Unauthorized user");
+#[get("/auth/validate")]
+async fn validate_user(cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    dbg!(cookies.get_private("auth_key"));
+    match cookies.get_private("auth_key") {
+        Some(c) => {
+            if validate_jwt(c.value()).await {
+                Custom(Status::Ok, "Authorized")
+            } else {
+                Custom(Status::Forbidden, "Invalid JSON Web Token")
+            }
         }
+        None => Custom(Status::Forbidden, "No credentials"),
     }
-    let cookie = jwt.unwrap();
-    let cookie = cookie.value();
-    let jwt_key = dotenv::var("SECRET_JWT_KEY").expect("jwt_secret not defined");
+}
 
-    match decode::<Claims>(
-        &cookie,
-        &DecodingKey::from_secret(jwt_key.as_ref()),
-        &Validation::default(),
-    ) {
-        Ok(..) => {
-            //
-            todo!();
-        }
-        Err(e) => {
-            eprintln!("JWT error: {}", &e);
-            Custom(Status::Forbidden, "Invalid JSON Web Token")
-        }
-    }
+#[options("/<_..>")]
+async fn options_handler() -> () {
+    ()
 }
 
 #[launch]
 async fn rocket() -> _ {
-    //TODO: move back to each routes in case the db conn breaks
     dotenv().ok();
-    rocket::build().mount("/", routes![create_user, login_user])
+    rocket::build().attach(cors::CORS).mount(
+        "/",
+        routes![create_user, login_user, validate_user, options_handler],
+    )
 }
