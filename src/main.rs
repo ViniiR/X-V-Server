@@ -1,15 +1,16 @@
 mod auth;
 mod cors;
 mod database;
+mod routes;
 
-use auth::{create_jwt, hash::hash_str, validate_jwt};
-use database::{connect_db, email_exists, make_user, user::User, verify_password};
+use auth::validate_jwt;
+use database::{delete_user, user::User, user_has_credentials};
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
-    http::{Cookie, CookieJar, SameSite, Status},
-    response::status::{Custom, NoContent},
-    serde::{json::Json, Deserialize, Serialize},
+    http::{CookieJar, Status},
+    response::status::Custom,
+    serde::{Deserialize, Serialize},
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -150,7 +151,7 @@ struct Claims {
     exp: usize,
 }
 
-async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom<&'static str>> {
+pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom<&'static str>> {
     let res = validate_user_name(&user.user_name).await;
     if !res.valid {
         return Err(Custom(Status::BadRequest, res.message));
@@ -174,92 +175,60 @@ async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom<&'s
     Ok(())
 }
 
-#[post("/user/create", format = "application/json", data = "<form_data>")]
-async fn create_user(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let mut data: User = form_data.into_inner();
-
-    if let Err(e) = validate_minimal_user_credentials(&data).await {
-        return e;
-    }
-    match hash_str(&data.password).await {
-        Ok(s) => {
-            data.password = s;
-        }
-        Err(..) => {
-            return Custom(Status::InternalServerError, "Internal server error");
-        }
-    }
-
-    let pool = connect_db().await;
-
-    match make_user(&data, &pool).await {
-        Ok(..) => match create_jwt(&data.email).await {
-            Ok(c) => {
-                cookies.add_private(c);
-                Custom(Status::Created, "User created")
-            }
-            Err(e) => e,
-        },
-        Err(e) => e,
-    }
-}
-
-#[post("/user/login", format = "application/json", data = "<form_data>")]
-async fn login_user(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let data: LoginData = form_data.into_inner();
-
-    let res = validate_email(&data.email).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
-    }
-
-    let res = validate_password(&data.password).await;
-    if !res.valid {
-        return Custom(Status::BadRequest, res.message);
-    }
-
-    let pool = connect_db().await;
-
-    if !email_exists(&data.email, &pool).await
-        || !verify_password(&data.email, &data.password, &pool).await
-    {
-        return Custom(Status::BadRequest, "Invalid credentials");
-    }
-
-    match create_jwt(&data.email).await {
-        Ok(c) => {
-            cookies.add_private(c);
-            Custom(Status::Ok, "Ok")
-        }
-        Err(e) => e,
-    }
-}
-
-#[get("/auth/validate")]
-async fn validate_user(cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    dbg!(cookies.get_private("auth_key"));
-    match cookies.get_private("auth_key") {
-        Some(c) => {
-            if validate_jwt(c.value()).await {
-                Custom(Status::Ok, "Authorized")
-            } else {
-                Custom(Status::Forbidden, "Invalid JSON Web Token")
+#[delete("/user/delete")]
+async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    if let Some(c) = jwt {
+        if let Ok(s) = validate_jwt(&c.value()).await {
+            let pool = database::connect_db().await;
+            if user_has_credentials(&s, &pool).await {
+                if let Ok(_) = delete_user(&s.email, &pool).await {
+                    cookies.remove_private("auth_key");
+                    return Custom(Status::NoContent, "User deleted");
+                }
             }
         }
-        None => Custom(Status::Forbidden, "No credentials"),
     }
+
+    Custom(Status::Forbidden, "Unauthorized user")
+
+    //
+
+    //match jwt {
+    //    Some(c) => match validate_jwt(&c.value()).await {
+    //        Ok(s) => {
+    //            let pool = database::connect_db().await;
+    //
+    //            if user_has_credentials(&s, &pool).await {
+    //                match delete_user(&s.email, &pool).await {
+    //                    Ok(..) => Custom(Status::NoContent, "User deleted"),
+    //                    Err(..) => Custom(Status::InternalServerError, "Internal server error"),
+    //                }
+    //            } else {
+    //                Custom(Status::Forbidden, "Unauthorized user")
+    //            }
+    //        }
+    //        Err(..) => Custom(Status::Forbidden, "Unauthorized user"),
+    //    },
+    //    None => Custom(Status::Forbidden, "Unauthorized user"),
+    //}
 }
 
 #[options("/<_..>")]
-async fn options_handler() -> () {
-    ()
-}
+async fn options() {}
 
 #[launch]
 async fn rocket() -> _ {
     dotenv().ok();
     rocket::build().attach(cors::CORS).mount(
         "/",
-        routes![create_user, login_user, validate_user, options_handler],
+        routes![
+            routes::user::create,
+            routes::user::login,
+            routes::user::logout,
+            delete,
+            routes::auth::validate,
+            options
+        ],
     )
 }

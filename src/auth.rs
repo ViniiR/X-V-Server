@@ -2,19 +2,28 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use rocket::{
     http::{Cookie, SameSite, Status},
     response::status::Custom,
+    serde::json,
     time::{Duration, OffsetDateTime},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{database::user::User, Claims, LoginData};
 
 pub mod hash;
 
-pub async fn create_jwt(claims: &str) -> Result<Cookie<'static>, Custom<&'static str>> {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Sub {
+    pub id: u32,
+    pub user_at: String,
+    pub email: String,
+}
+
+pub async fn create_jwt(claims: Sub) -> Result<Cookie<'static>, Custom<&'static str>> {
     let mut exp = OffsetDateTime::now_utc();
     exp += Duration::weeks(1);
     let exp = usize::try_from(exp.unix_timestamp()).expect("unable to unwrap UNIX epoch");
     let claims = Claims {
-        sub: claims.to_string(),
+        sub: json::to_string(&claims).expect("unable to convert to string"),
         exp,
     };
 
@@ -35,13 +44,14 @@ pub async fn create_jwt(claims: &str) -> Result<Cookie<'static>, Custom<&'static
             auth_cookie.set_expires(now);
             auth_cookie.set_secure(true);
             auth_cookie.set_same_site(SameSite::None);
+            auth_cookie.set_path("/");
             Ok(auth_cookie)
         }
         Err(..) => Err(Custom(Status::InternalServerError, "InternalServerError")),
     }
 }
 
-pub async fn validate_jwt(jwt: &str) -> bool {
+pub async fn validate_jwt(jwt: &str) -> Result<Sub, ()> {
     let jwt_secret = dotenv::var("SECRET_JWT_KEY").expect("SECRET_JWT_KEY not found");
 
     match decode::<Claims>(
@@ -49,7 +59,11 @@ pub async fn validate_jwt(jwt: &str) -> bool {
         &DecodingKey::from_secret(jwt_secret.as_ref()),
         &Validation::default(),
     ) {
-        Ok(..) => true,
-        Err(..) => false,
+        Ok(c) => {
+            let sub = c.claims.sub;
+            let sub: Sub = json::from_str(&sub).unwrap();
+            Ok(sub)
+        }
+        Err(..) => Err(()),
     }
 }
