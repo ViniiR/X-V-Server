@@ -1,13 +1,16 @@
+use crate::auth::validate_jwt;
 use crate::auth::{create_jwt, hash::hash_str};
 use crate::database::{
     connect_db, email_exists, make_jwt_claims, make_user, user::User, verify_password,
 };
+use crate::database::{delete_user, user_has_credentials};
 use crate::{validate_email, validate_minimal_user_credentials, validate_password, LoginData};
 use rocket::{
     http::{CookieJar, Status},
     response::status::Custom,
     serde::json::Json,
 };
+use serde::Serialize;
 
 #[post("/user/log-out")]
 pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {
@@ -94,4 +97,22 @@ pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custo
         },
         Err(e) => e,
     }
+}
+
+#[delete("/user/delete")]
+pub async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    if let Some(c) = jwt {
+        if let Ok(s) = validate_jwt(&c.value()).await {
+            let pool = crate::database::connect_db().await;
+            if user_has_credentials(&s, &pool).await {
+                if let Ok(_) = delete_user(&s.email, &pool).await {
+                    cookies.remove_private("auth_key");
+                    return Custom(Status::NoContent, "User deleted");
+                }
+            }
+        }
+    }
+
+    Custom(Status::Forbidden, "Unauthorized user")
 }

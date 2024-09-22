@@ -1,11 +1,13 @@
-use core::{error, panic};
 use std::env::var;
 
 use rocket::{http::Status, response::status::Custom};
-use sqlx::{postgres::PgPoolOptions, query, query_as, Pool, Postgres};
+use sqlx::{postgres::PgPoolOptions, query, query_as, Error, Pool, Postgres};
 use user::User;
 
-use crate::auth::{hash::compare_password, Sub};
+use crate::{
+    auth::{hash::compare_password, Sub},
+    ClientUser,
+};
 
 pub mod user;
 
@@ -38,6 +40,52 @@ pub async fn email_exists(email: &str, pool: &Pool<Postgres>) -> bool {
     }
 }
 
+pub async fn change_password(
+    email: &str,
+    new_password: &str,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET password = $1 WHERE email = $2",
+        new_password,
+        email
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn change_email(
+    email: &str,
+    new_email: &str,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET email = $1 WHERE email = $2",
+        new_email,
+        email
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn change_user_at(
+    email: &str,
+    new_user_at: &str,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET userat = $1 WHERE email = $2",
+        new_user_at,
+        email
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn verify_password(email: &str, password: &str, pool: &Pool<Postgres>) -> bool {
     match query!("SELECT password FROM users where email = $1", email)
         .fetch_one(pool)
@@ -45,6 +93,7 @@ pub async fn verify_password(email: &str, password: &str, pool: &Pool<Postgres>)
     {
         Ok(record) => {
             let p: String = record.password;
+            dbg!(compare_password(password, &p).await);
             compare_password(password, &p).await
         }
         Err(..) => false,
@@ -105,6 +154,21 @@ pub async fn make_jwt_claims(
             email: r.email,
         }),
         Err(..) => Err(Custom(Status::Forbidden, "User does not exist")),
+    }
+}
+
+pub async fn get_client_data(email: &str, pool: &Pool<Postgres>) -> Result<ClientUser, ()> {
+    let result = sqlx::query_as!(
+        ClientUser,
+        "SELECT username, userat FROM users WHERE email = $1",
+        email
+    )
+    .fetch_one(pool)
+    .await;
+
+    match result {
+        Ok(c) => Ok(c),
+        Err(..) => Err(()),
     }
 }
 

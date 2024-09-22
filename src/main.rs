@@ -4,13 +4,17 @@ mod database;
 mod routes;
 
 use auth::validate_jwt;
-use database::{delete_user, user::User, user_has_credentials};
+use database::{delete_user, get_client_data, user::User, user_has_credentials};
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
-    http::{CookieJar, Status},
-    response::status::Custom,
-    serde::{Deserialize, Serialize},
+    http::{ContentType, CookieJar, Status},
+    response::{status::Custom, Responder},
+    serde::{
+        json::{self, Json},
+        Deserialize, Serialize,
+    },
+    Response,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -175,47 +179,71 @@ pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom
     Ok(())
 }
 
-#[delete("/user/delete")]
-async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let jwt = cookies.get_private("auth_key");
-    if let Some(c) = jwt {
-        if let Ok(s) = validate_jwt(&c.value()).await {
-            let pool = database::connect_db().await;
-            if user_has_credentials(&s, &pool).await {
-                if let Ok(_) = delete_user(&s.email, &pool).await {
-                    cookies.remove_private("auth_key");
-                    return Custom(Status::NoContent, "User deleted");
-                }
-            }
-        }
-    }
-
-    Custom(Status::Forbidden, "Unauthorized user")
-
-    //
-
-    //match jwt {
-    //    Some(c) => match validate_jwt(&c.value()).await {
-    //        Ok(s) => {
-    //            let pool = database::connect_db().await;
-    //
-    //            if user_has_credentials(&s, &pool).await {
-    //                match delete_user(&s.email, &pool).await {
-    //                    Ok(..) => Custom(Status::NoContent, "User deleted"),
-    //                    Err(..) => Custom(Status::InternalServerError, "Internal server error"),
-    //                }
-    //            } else {
-    //                Custom(Status::Forbidden, "Unauthorized user")
-    //            }
-    //        }
-    //        Err(..) => Custom(Status::Forbidden, "Unauthorized user"),
-    //    },
-    //    None => Custom(Status::Forbidden, "Unauthorized user"),
-    //}
+#[derive(Serialize, Deserialize)]
+pub struct ClientUser {
+    #[serde(rename = "userName")]
+    username: String,
+    #[serde(rename = "userAt")]
+    userat: String,
+    //todo icon: Image?
 }
 
-#[options("/<_..>")]
-async fn options() {}
+pub struct DataResponse<T> {
+    status: Status,
+    data: Json<T>,
+}
+
+impl<'r, 'o: 'r, T: Serialize> Responder<'r, 'o> for DataResponse<T> {
+    fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'o> {
+        Response::build_from(self.data.respond_to(&request).unwrap())
+            .status(self.status)
+            .header(ContentType::JSON)
+            .ok()
+    }
+}
+
+#[get("/user/data", format = "application/json")]
+pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
+    let jwt = cookies.get_private("auth_key");
+
+    if let None = jwt {
+        return DataResponse {
+            status: Status::Forbidden,
+            data: Json("xablau?".to_string()),
+        };
+    }
+    if let Ok(s) = validate_jwt(&jwt.unwrap().value()).await {
+        let pool = crate::database::connect_db().await;
+
+        if let Ok(c) = get_client_data(&s.email, &pool).await {
+            let json_string = json::to_string(&c);
+            match json_string {
+                Ok(s) => {
+                    return DataResponse {
+                        status: Status::Ok,
+                        data: Json(s),
+                    };
+                }
+                Err(..) => {
+                    return DataResponse {
+                        status: Status::InternalServerError,
+                        data: Json("internal server error".to_string()),
+                    };
+                }
+            }
+        } else {
+            DataResponse {
+                status: Status::Forbidden,
+                data: Json("Unauthorized user".to_string()),
+            }
+        }
+    } else {
+        DataResponse {
+            status: Status::Forbidden,
+            data: Json("Unauthorized user".to_string()),
+        }
+    }
+}
 
 #[launch]
 async fn rocket() -> _ {
@@ -226,9 +254,16 @@ async fn rocket() -> _ {
             routes::user::create,
             routes::user::login,
             routes::user::logout,
-            delete,
+            routes::user::delete,
             routes::auth::validate,
-            options
+            options,
+            get_data,
+            routes::change::change_password,
+            routes::change::change_email,
+            routes::change::change_user_at
         ],
     )
 }
+
+#[options("/<_..>")]
+async fn options() {}
