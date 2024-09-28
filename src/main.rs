@@ -4,12 +4,16 @@ mod database;
 mod routes;
 
 use auth::validate_jwt;
-use database::{delete_user, get_client_data, user::User, user_has_credentials};
+use database::{
+    delete_user, get_client_data, get_email_from_user_at, get_followers_list, get_following_list,
+    get_id_from_email, user::User, user_exists, user_has_credentials, FollowData,
+};
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
     http::{ContentType, CookieJar, Status},
     response::{status::Custom, Responder},
+    route,
     serde::{
         json::{self, Json},
         Deserialize, Serialize,
@@ -32,7 +36,7 @@ struct ValidField {
 
 #[macro_use]
 extern crate rocket;
-const EMAIL_REGEX: &'static str =
+const EMAIL_REGEX: &str =
     r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})$";
 
 async fn validate_user_name(user_name: &str) -> ValidField {
@@ -185,7 +189,10 @@ pub struct ClientUser {
     username: String,
     #[serde(rename = "userAt")]
     userat: String,
-    //todo icon: Image?
+    #[serde(rename = "followingCount")]
+    followingcount: i32,
+    #[serde(rename = "followersCount")]
+    followerscount: i32, //todo icon: Image?
 }
 
 pub struct DataResponse<T> {
@@ -202,6 +209,102 @@ impl<'r, 'o: 'r, T: Serialize> Responder<'r, 'o> for DataResponse<T> {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ProfileData {
+    #[serde(rename = "userName")]
+    username: String,
+    #[serde(rename = "userAt")]
+    user_at: String,
+    #[serde(rename = "followersCount")]
+    followers_count: i32,
+    #[serde(rename = "followingCount")]
+    following_count: i32,
+    #[serde(rename = "isFollowing")]
+    is_following: bool,
+    #[serde(rename = "isHimself")]
+    is_himself: bool,
+    //icon
+}
+
+#[get("/user/profile/<user_at>", format = "application/json")]
+pub async fn get_profile_data(
+    user_at: &str,
+    cookies: &CookieJar<'_>,
+) -> DataResponse<Result<ProfileData, &'static str>> {
+    let jwt = cookies.get_private("auth_key");
+    // todo
+    let mut is_following = false;
+    let mut is_himself = false;
+
+    if !(validate_user_at(user_at).await).valid {
+        return DataResponse {
+            status: Status::NotFound,
+            data: Json(Err("Not found")),
+        };
+    }
+
+    let pool = database::connect_db().await;
+
+    if !user_exists(user_at, &pool).await {
+        return DataResponse {
+            status: Status::NotFound,
+            data: Json(Err("Not found")),
+        };
+    }
+
+    let Ok(email) = get_email_from_user_at(&user_at, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    if let Ok(id) = get_id_from_email(&email, &pool).await {
+        if let Some(c) = jwt {
+            let Ok(s) = validate_jwt(&c.value()).await else {
+                return DataResponse {
+                    status: Status::Forbidden,
+                    data: Json(Err("Unauthorized user")),
+                };
+            };
+
+            if s.id == id {
+                is_himself = true;
+            }
+
+            if !user_exists(&s.user_at, &pool).await {
+                return DataResponse {
+                    status: Status::Forbidden,
+                    data: Json(Err("Unauthorized user")),
+                };
+            }
+
+            if let Ok(b) = database::is_following(&id, &s.id, &pool).await {
+                is_following = b;
+            }
+        }
+    }
+
+    let Ok(data) = get_client_data(&email, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    DataResponse {
+        status: Status::Ok,
+        data: Json(Ok(ProfileData {
+            user_at: data.userat,
+            username: data.username,
+            is_following,
+            following_count: data.followingcount,
+            followers_count: data.followerscount,
+            is_himself,
+        })),
+    }
+}
+
 #[get("/user/data", format = "application/json")]
 pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
     let jwt = cookies.get_private("auth_key");
@@ -209,7 +312,7 @@ pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
     if let None = jwt {
         return DataResponse {
             status: Status::Forbidden,
-            data: Json("xablau?".to_string()),
+            data: Json("Unauthorized user".to_string()),
         };
     }
     if let Ok(s) = validate_jwt(&jwt.unwrap().value()).await {
@@ -218,18 +321,14 @@ pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
         if let Ok(c) = get_client_data(&s.email, &pool).await {
             let json_string = json::to_string(&c);
             match json_string {
-                Ok(s) => {
-                    return DataResponse {
-                        status: Status::Ok,
-                        data: Json(s),
-                    };
-                }
-                Err(..) => {
-                    return DataResponse {
-                        status: Status::InternalServerError,
-                        data: Json("internal server error".to_string()),
-                    };
-                }
+                Ok(s) => DataResponse {
+                    status: Status::Ok,
+                    data: Json(s),
+                },
+                Err(..) => DataResponse {
+                    status: Status::InternalServerError,
+                    data: Json("internal server error".to_string()),
+                },
             }
         } else {
             DataResponse {
@@ -242,6 +341,88 @@ pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
             status: Status::Forbidden,
             data: Json("Unauthorized user".to_string()),
         }
+    }
+}
+
+#[get("/user/following/<user_at>")]
+pub async fn get_following(
+    user_at: &str,
+    cookies: &CookieJar<'_>,
+) -> DataResponse<Result<Vec<FollowData>, &'static str>> {
+    //let jwt = cookies.get_private("auth_key");
+    //let Some(c) = jwt else {
+    //    return DataResponse {
+    //        status: Status::Forbidden,
+    //        data: Json(Err("forbidden")),
+    //    };
+    //};
+    //
+    //let Ok(s) = validate_jwt(c.value()).await else {
+    //    return DataResponse {
+    //        status: Status::Forbidden,
+    //        data: Json(Err("forbidden")),
+    //    };
+    //};
+
+    let pool = database::connect_db().await;
+    let Ok(email) = get_email_from_user_at(user_at, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    let Ok(v) = get_following_list(&email, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    DataResponse {
+        status: Status::Ok,
+        data: Json(Ok(v)),
+    }
+}
+
+#[get("/user/followers/<user_at>")]
+pub async fn get_followers(
+    user_at: &str,
+    cookies: &CookieJar<'_>,
+) -> DataResponse<Result<Vec<FollowData>, &'static str>> {
+    //let jwt = cookies.get_private("auth_key");
+    //let Some(c) = jwt else {
+    //    return DataResponse {
+    //        status: Status::Forbidden,
+    //        data: Json(Err("forbidden")),
+    //    };
+    //};
+    //
+    //let Ok(s) = validate_jwt(c.value()).await else {
+    //    return DataResponse {
+    //        status: Status::Forbidden,
+    //        data: Json(Err("forbidden")),
+    //    };
+    //};
+
+    let pool = database::connect_db().await;
+    let Ok(email) = get_email_from_user_at(user_at, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    let Ok(v) = get_followers_list(&email, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    DataResponse {
+        status: Status::Ok,
+        data: Json(Ok(v)),
     }
 }
 
@@ -258,9 +439,13 @@ async fn rocket() -> _ {
             routes::auth::validate,
             options,
             get_data,
+            get_profile_data,
+            get_following,
+            get_followers,
             routes::change::change_password,
             routes::change::change_email,
-            routes::change::change_user_at
+            routes::change::change_user_at,
+            routes::change::follow_user
         ],
     )
 }

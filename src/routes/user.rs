@@ -10,7 +10,6 @@ use rocket::{
     response::status::Custom,
     serde::json::Json,
 };
-use serde::Serialize;
 
 #[post("/user/log-out")]
 pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {

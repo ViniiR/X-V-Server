@@ -13,7 +13,7 @@ pub mod hash;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Sub {
-    pub id: u32,
+    pub id: i32,
     pub user_at: String,
     pub email: String,
 }

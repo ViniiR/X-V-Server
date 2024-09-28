@@ -1,6 +1,7 @@
 use std::env::var;
 
 use rocket::{http::Status, response::status::Custom};
+use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, query, query_as, Error, Pool, Postgres};
 use user::User;
 
@@ -100,11 +101,111 @@ pub async fn verify_password(email: &str, password: &str, pool: &Pool<Postgres>)
     }
 }
 
+pub struct FollowingDBData {
+    followers: Option<Vec<i32>>,
+    following: Option<Vec<i32>>,
+}
+
+pub async fn get_email_from_id(id: &i32, pool: &Pool<Postgres>) -> Result<String, Error> {
+    let email = sqlx::query!("SELECT email FROM users WHERE id = $1", id)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(email.email)
+}
+
 pub async fn delete_user(email: &str, pool: &Pool<Postgres>) -> Result<(), sqlx::Error> {
+    let delete_req_id = get_id_from_email(email, pool).await?;
+    let unfollow_data = sqlx::query_as!(
+        FollowingDBData,
+        "SELECT following, followers FROM users WHERE email = $1",
+        email
+    )
+    .fetch_one(pool)
+    .await?;
+    if unfollow_data.followers.is_some() {
+        let followers = unfollow_data.followers.unwrap();
+        for id in followers {
+            unfollow_user(&delete_req_id, &id, pool).await?;
+        }
+    }
+    if unfollow_data.following.is_some() {
+        let following = unfollow_data.following.unwrap();
+        for id in following {
+            unfollow_user(&id, &delete_req_id, pool).await?;
+        }
+    }
     sqlx::query!("DELETE FROM users WHERE email = $1", email)
         .execute(pool)
         .await?;
     Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FollowData {
+    userat: String,
+    username: String,
+    // icon
+}
+
+pub async fn get_following_list(
+    email: &str,
+    pool: &Pool<Postgres>,
+) -> Result<Vec<FollowData>, Error> {
+    let res = sqlx::query!("SELECT following FROM users WHERE email = $1", email)
+        .fetch_one(pool)
+        .await?;
+
+    let mut vec: Vec<FollowData> = vec![];
+
+    let Some(v) = res.following else {
+        return Ok(Vec::new());
+    };
+
+    for u in v {
+        let res = sqlx::query_as!(
+            FollowData,
+            "SELECT userat, username FROM users WHERE id = $1",
+            u
+        )
+        .fetch_one(pool)
+        .await;
+        if let Ok(v) = res {
+            vec.push(v);
+        };
+    }
+
+    Ok(vec)
+}
+
+pub async fn get_followers_list(
+    email: &str,
+    pool: &Pool<Postgres>,
+) -> Result<Vec<FollowData>, Error> {
+    let res = sqlx::query!("SELECT followers FROM users WHERE email = $1", email)
+        .fetch_one(pool)
+        .await?;
+
+    let mut vec: Vec<FollowData> = vec![];
+
+    let Some(v) = res.followers else {
+        return Ok(Vec::new());
+    };
+
+    for u in v {
+        let res = sqlx::query_as!(
+            FollowData,
+            "SELECT userat, username FROM users WHERE id = $1",
+            u
+        )
+        .fetch_one(pool)
+        .await;
+        if let Ok(v) = res {
+            vec.push(v);
+        };
+    }
+
+    Ok(vec)
 }
 
 pub async fn user_has_credentials(sub: &Sub, pool: &Pool<Postgres>) -> bool {
@@ -117,13 +218,7 @@ pub async fn user_has_credentials(sub: &Sub, pool: &Pool<Postgres>) -> bool {
     .await;
 
     match result {
-        Ok(s) => {
-            if s.email == sub.email && s.id as u32 == sub.id && s.userat == sub.user_at {
-                true
-            } else {
-                false
-            }
-        }
+        Ok(s) => s.email == sub.email && s.id == sub.id && s.userat == sub.user_at,
         Err(..) => false,
     }
 }
@@ -149,7 +244,7 @@ pub async fn make_jwt_claims(
 
     match result {
         Ok(r) => Ok(Sub {
-            id: r.id as u32,
+            id: r.id,
             user_at: r.userat,
             email: r.email,
         }),
@@ -160,7 +255,7 @@ pub async fn make_jwt_claims(
 pub async fn get_client_data(email: &str, pool: &Pool<Postgres>) -> Result<ClientUser, ()> {
     let result = sqlx::query_as!(
         ClientUser,
-        "SELECT username, userat FROM users WHERE email = $1",
+        "SELECT username, userat, followingcount, followerscount FROM users WHERE email = $1",
         email
     )
     .fetch_one(pool)
@@ -173,19 +268,20 @@ pub async fn get_client_data(email: &str, pool: &Pool<Postgres>) -> Result<Clien
 }
 
 pub async fn make_user(user: &User, pool: &Pool<Postgres>) -> Result<(), Custom<&'static str>> {
-    if user_exists(&user.user_at, &pool).await {
+    if user_exists(&user.user_at, pool).await {
         return Err(Custom(Status::BadRequest, "Username already in use"));
     }
-    if email_exists(&user.email, &pool).await {
+    if email_exists(&user.email, pool).await {
         return Err(Custom(Status::BadRequest, "Email already in use"));
     }
 
     let result = query!(
-        "INSERT INTO users (username, userat, email, password) VALUES ($1,$2,$3,$4);",
+        "INSERT INTO users (username, userat, email, password, followingcount, followerscount) VALUES ($1,$2,$3,$4,$5,$6);",
         user.user_name,
         user.user_at,
         user.email,
-        user.password
+        user.password,
+        0,0
     )
     .execute(pool)
     .await;
@@ -194,4 +290,103 @@ pub async fn make_user(user: &User, pool: &Pool<Postgres>) -> Result<(), Custom<
         Ok(..) => Ok(()),
         Err(..) => Err(Custom(Status::InternalServerError, "Internal server error")),
     }
+}
+
+pub async fn get_email_from_user_at(user_at: &str, pool: &Pool<Postgres>) -> Result<String, Error> {
+    let email = sqlx::query!("SELECT email FROM users WHERE userat = $1", user_at)
+        .fetch_one(pool)
+        .await?;
+    Ok(email.email)
+}
+
+pub async fn get_id_from_email(email: &str, pool: &Pool<Postgres>) -> Result<i32, Error> {
+    let id = sqlx::query!("SELECT id FROM users WHERE email = $1", email)
+        .fetch_one(pool)
+        .await?;
+
+    Ok(id.id)
+}
+
+pub async fn is_following(
+    possibly_followed_owner_id: &i32,
+    follow_suspect_id: &i32,
+    pool: &Pool<Postgres>,
+) -> Result<bool, Error> {
+    let res = sqlx::query!(
+        "SELECT followers FROM users WHERE id = $1",
+        possibly_followed_owner_id,
+    )
+    .fetch_one(pool)
+    .await?;
+    let Some(followers) = res.followers else {
+        return Ok(false);
+    };
+    if followers.contains(follow_suspect_id) {
+        let res = sqlx::query!(
+            "SELECT following FROM users WHERE id = $1",
+            follow_suspect_id,
+        )
+        .fetch_one(pool)
+        .await?;
+        let Some(following) = res.following else {
+            return Ok(false);
+        };
+        if following.contains(possibly_followed_owner_id) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+pub async fn follow_user(
+    target_id: &i32,
+    following_id: &i32,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET followers = array_append(followers, $2), followerscount = followerscount + 1 WHERE id = $1",
+        target_id,
+        following_id
+
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query!(
+        "UPDATE users SET following = array_append(following, $2), followingcount = followingcount + 1 WHERE id = $1",
+        following_id,
+        target_id,
+
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn unfollow_user(
+    target_id: &i32,
+    unfollowing_id: &i32,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET followers = array_remove(followers, $2), followerscount = followerscount - 1 WHERE id = $1",
+        target_id,
+        unfollowing_id
+
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query!(
+        "UPDATE users SET following = array_remove(following, $2), followingcount = followingcount - 1 WHERE id = $1",
+        unfollowing_id,
+        target_id,
+
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }

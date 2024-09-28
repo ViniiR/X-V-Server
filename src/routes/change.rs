@@ -197,3 +197,58 @@ pub async fn change_user_at(
         Err(..) => Custom(Status::Forbidden, "Unauthorized user"),
     }
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FollowData {
+    user_at: String,
+    follow: bool,
+}
+
+#[patch("/user/follow", format = "application/json", data = "<data>")]
+pub async fn follow_user(data: Json<FollowData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    let data = data.into_inner();
+
+    let Some(cookie) = jwt else {
+        return Custom(Status::Forbidden, "Unauthorized");
+    };
+
+    let Ok(sub) = validate_jwt(cookie.value()).await else {
+        return Custom(Status::Forbidden, "Unauthorized");
+    };
+
+    if sub.user_at == data.user_at {
+        return Custom(Status::BadRequest, "You can't follow yourself");
+    }
+
+    let pool = database::connect_db().await;
+
+    if !user_exists(&sub.user_at, &pool).await {
+        return Custom(Status::Forbidden, "Unauthorized");
+    }
+
+    if !user_exists(&data.user_at, &pool).await {
+        return Custom(Status::BadRequest, "User doesn't exist");
+    }
+
+    let Ok(follow_target_email) = database::get_email_from_user_at(&data.user_at, &pool).await
+    else {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    };
+
+    let Ok(follow_target_id) = database::get_id_from_email(&follow_target_email, &pool).await
+    else {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    };
+
+    if data.follow {
+        let Ok(..) = database::follow_user(&follow_target_id, &sub.id, &pool).await else {
+            return Custom(Status::InternalServerError, "InternalServerError");
+        };
+    } else {
+        let Ok(..) = database::unfollow_user(&follow_target_id, &sub.id, &pool).await else {
+            return Custom(Status::InternalServerError, "InternalServerError");
+        };
+    }
+    Custom(Status::Ok, "Ok")
+}
