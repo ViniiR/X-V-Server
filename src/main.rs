@@ -3,6 +3,8 @@ mod cors;
 mod database;
 mod routes;
 
+use core::str;
+
 use auth::validate_jwt;
 use database::{
     delete_user, get_client_data, get_email_from_user_at, get_followers_list, get_following_list,
@@ -11,6 +13,7 @@ use database::{
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
+    form::validate::Len,
     http::{ContentType, CookieJar, Status},
     response::{status::Custom, Responder},
     route,
@@ -184,6 +187,20 @@ pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct UpdatedClientUser {
+    #[serde(rename = "userName")]
+    username: String,
+    #[serde(rename = "userAt")]
+    userat: String,
+    #[serde(rename = "followingCount")]
+    followingcount: i32,
+    #[serde(rename = "followersCount")]
+    followerscount: i32,
+    bio: Option<String>,
+    icon: String,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct ClientUser {
     #[serde(rename = "userName")]
     username: String,
@@ -192,7 +209,9 @@ pub struct ClientUser {
     #[serde(rename = "followingCount")]
     followingcount: i32,
     #[serde(rename = "followersCount")]
-    followerscount: i32, //todo icon: Image?
+    followerscount: i32,
+    bio: Option<String>,
+    icon: Option<Vec<u8>>,
 }
 
 pub struct DataResponse<T> {
@@ -202,7 +221,7 @@ pub struct DataResponse<T> {
 
 impl<'r, 'o: 'r, T: Serialize> Responder<'r, 'o> for DataResponse<T> {
     fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'o> {
-        Response::build_from(self.data.respond_to(&request).unwrap())
+        Response::build_from(self.data.respond_to(request).unwrap())
             .status(self.status)
             .header(ContentType::JSON)
             .ok()
@@ -223,7 +242,8 @@ pub struct ProfileData {
     is_following: bool,
     #[serde(rename = "isHimself")]
     is_himself: bool,
-    //icon
+    bio: String,
+    icon: String,
 }
 
 #[get("/user/profile/<user_at>", format = "application/json")]
@@ -301,6 +321,16 @@ pub async fn get_profile_data(
             following_count: data.followingcount,
             followers_count: data.followerscount,
             is_himself,
+            icon: if data.icon.is_none() {
+                String::new()
+            } else {
+                str::from_utf8(&data.icon.unwrap()).unwrap().to_owned()
+            },
+            bio: if data.bio.is_none() {
+                String::new()
+            } else {
+                data.bio.unwrap()
+            },
         })),
     }
 }
@@ -309,17 +339,29 @@ pub async fn get_profile_data(
 pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
     let jwt = cookies.get_private("auth_key");
 
-    if let None = jwt {
+    if jwt.is_none() {
         return DataResponse {
             status: Status::Forbidden,
             data: Json("Unauthorized user".to_string()),
         };
     }
-    if let Ok(s) = validate_jwt(&jwt.unwrap().value()).await {
+    if let Ok(s) = validate_jwt(jwt.unwrap().value()).await {
         let pool = crate::database::connect_db().await;
 
         if let Ok(c) = get_client_data(&s.email, &pool).await {
-            let json_string = json::to_string(&c);
+            let updated: UpdatedClientUser = UpdatedClientUser {
+                username: c.username,
+                userat: c.userat,
+                bio: c.bio,
+                followingcount: c.followingcount,
+                followerscount: c.followerscount,
+                icon: if c.icon.is_none() {
+                    String::new()
+                } else {
+                    str::from_utf8(&c.icon.unwrap()).unwrap().to_owned()
+                },
+            };
+            let json_string = json::to_string(&updated);
             match json_string {
                 Ok(s) => DataResponse {
                     status: Status::Ok,
@@ -426,6 +468,77 @@ pub async fn get_followers(
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct ProfileUpdate {
+    #[serde(rename = "userName")]
+    username: String,
+    #[serde(rename = "bio")]
+    bio: String,
+    #[serde(rename = "icon")]
+    icon: String,
+}
+#[patch(
+    "/user/change/profile",
+    format = "application/json",
+    data = "<profile_data>"
+)]
+pub async fn change_profile(
+    profile_data: Json<ProfileUpdate>,
+    cookies: &CookieJar<'_>,
+) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    if jwt.is_none() {
+        return Custom(Status::Forbidden, "forbidden");
+    }
+
+    let jwt = jwt.unwrap();
+
+    let Ok(s) = validate_jwt(jwt.value()).await else {
+        return Custom(Status::Forbidden, "forbidden");
+    };
+
+    if profile_data.bio.len() > 150 {
+        return Custom(Status::BadRequest, "bio too long");
+    }
+
+    if profile_data.username.len() > 20 {
+        return Custom(Status::BadRequest, "username too long");
+    }
+
+    if profile_data.username.len() < 2 {
+        return Custom(Status::BadRequest, "username too short");
+    }
+
+    if !(crate::validate_user_name(&profile_data.username).await).valid {
+        return Custom(Status::BadRequest, "username invalid");
+    }
+
+    let pool = database::connect_db().await;
+
+    if database::change_bio(&s.email, &profile_data.bio, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    if database::change_username(&s.email, &profile_data.username, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    if database::change_icon(&s.email, &profile_data.icon, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    Custom(Status::Ok, "Ok")
+}
+
 #[launch]
 async fn rocket() -> _ {
     dotenv().ok();
@@ -442,6 +555,7 @@ async fn rocket() -> _ {
             get_profile_data,
             get_following,
             get_followers,
+            change_profile,
             routes::change::change_password,
             routes::change::change_email,
             routes::change::change_user_at,

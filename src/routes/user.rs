@@ -102,10 +102,10 @@ pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custo
 pub async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let jwt = cookies.get_private("auth_key");
     if let Some(c) = jwt {
-        if let Ok(s) = validate_jwt(&c.value()).await {
+        if let Ok(s) = validate_jwt(c.value()).await {
             let pool = crate::database::connect_db().await;
             if user_has_credentials(&s, &pool).await {
-                if let Ok(_) = delete_user(&s.email, &pool).await {
+                if delete_user(&s.email, &pool).await.is_ok() {
                     cookies.remove_private("auth_key");
                     return Custom(Status::NoContent, "User deleted");
                 }

@@ -145,7 +145,7 @@ pub async fn delete_user(email: &str, pool: &Pool<Postgres>) -> Result<(), sqlx:
 pub struct FollowData {
     userat: String,
     username: String,
-    // icon
+    icon: Option<Vec<u8>>,
 }
 
 pub async fn get_following_list(
@@ -165,7 +165,7 @@ pub async fn get_following_list(
     for u in v {
         let res = sqlx::query_as!(
             FollowData,
-            "SELECT userat, username FROM users WHERE id = $1",
+            "SELECT userat, username, icon FROM users WHERE id = $1",
             u
         )
         .fetch_one(pool)
@@ -195,7 +195,7 @@ pub async fn get_followers_list(
     for u in v {
         let res = sqlx::query_as!(
             FollowData,
-            "SELECT userat, username FROM users WHERE id = $1",
+            "SELECT userat, username, icon FROM users WHERE id = $1",
             u
         )
         .fetch_one(pool)
@@ -255,7 +255,7 @@ pub async fn make_jwt_claims(
 pub async fn get_client_data(email: &str, pool: &Pool<Postgres>) -> Result<ClientUser, ()> {
     let result = sqlx::query_as!(
         ClientUser,
-        "SELECT username, userat, followingcount, followerscount FROM users WHERE email = $1",
+        "SELECT username, userat, followingcount, followerscount, icon, bio FROM users WHERE email = $1",
         email
     )
     .fetch_one(pool)
@@ -388,5 +388,58 @@ pub async fn unfollow_user(
     .execute(pool)
     .await?;
 
+    Ok(())
+}
+
+pub async fn change_bio(email: &str, bio: &str, pool: &Pool<Postgres>) -> Result<(), Error> {
+    let old_bio = sqlx::query!("SELECT bio FROM users WHERE email = $1", email)
+        .fetch_one(pool)
+        .await?;
+    let Some(b) = old_bio.bio else {
+        sqlx::query!("UPDATE users SET bio = $1 WHERE email = $2", bio, email)
+            .execute(pool)
+            .await?;
+        return Ok(());
+    };
+    if b != bio {
+        sqlx::query!("UPDATE users SET bio = $1 WHERE email = $2", bio, email)
+            .execute(pool)
+            .await?;
+        return Ok(());
+    }
+
+    Ok(())
+}
+
+pub async fn change_username(
+    email: &str,
+    username: &str,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    let old_name = sqlx::query!("SELECT username FROM users WHERE email = $1", email)
+        .fetch_one(pool)
+        .await?;
+    if old_name.username != username {
+        sqlx::query!(
+            "UPDATE users SET username = $1 WHERE email = $2",
+            username,
+            email
+        )
+        .execute(pool)
+        .await?;
+        return Ok(());
+    }
+
+    Ok(())
+}
+
+pub async fn change_icon(email: &str, icon: &str, pool: &Pool<Postgres>) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE users SET icon = $1 WHERE email = $2",
+        Some(icon.as_bytes()),
+        email
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
