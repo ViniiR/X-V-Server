@@ -7,7 +7,7 @@ use user::User;
 
 use crate::{
     auth::{hash::compare_password, Sub},
-    ClientUser,
+    routes::types::ClientUser,
 };
 
 pub mod user;
@@ -143,9 +143,9 @@ pub async fn delete_user(email: &str, pool: &Pool<Postgres>) -> Result<(), sqlx:
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FollowData {
-    userat: String,
-    username: String,
-    icon: Option<Vec<u8>>,
+    pub userat: String,
+    pub username: String,
+    pub icon: Option<Vec<u8>>,
 }
 
 pub async fn get_following_list(

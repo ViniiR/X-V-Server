@@ -1,5 +1,3 @@
-use std::clone;
-
 use rocket::{http::CookieJar, http::Status, response::status::Custom, serde::json::Json};
 use serde::{Deserialize, Serialize};
 
@@ -8,24 +6,7 @@ use crate::{
     database::{self, email_exists, user_exists, user_has_credentials, verify_password},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PasswordChangeData {
-    #[serde(rename = "currentPassword")]
-    current_password: String,
-    #[serde(rename = "newPassword")]
-    new_password: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EmailChangeData {
-    email: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UserAtChangeData {
-    #[serde(rename = "userAt")]
-    user_at: String,
-}
+use super::types::{EmailChangeData, PasswordChangeData, ProfileUpdate, UserAtChangeData};
 
 #[patch(
     "/user/change/password",
@@ -202,6 +183,7 @@ pub async fn change_user_at(
 pub struct FollowData {
     user_at: String,
     follow: bool,
+    icon: Option<Vec<i32>>,
 }
 
 #[patch("/user/follow", format = "application/json", data = "<data>")]
@@ -250,5 +232,67 @@ pub async fn follow_user(data: Json<FollowData>, cookies: &CookieJar<'_>) -> Cus
             return Custom(Status::InternalServerError, "InternalServerError");
         };
     }
+    Custom(Status::Ok, "Ok")
+}
+
+#[patch(
+    "/user/change/profile",
+    format = "application/json",
+    data = "<profile_data>"
+)]
+pub async fn change_profile(
+    profile_data: Json<ProfileUpdate>,
+    cookies: &CookieJar<'_>,
+) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    if jwt.is_none() {
+        return Custom(Status::Forbidden, "forbidden");
+    }
+
+    let jwt = jwt.unwrap();
+
+    let Ok(s) = validate_jwt(jwt.value()).await else {
+        return Custom(Status::Forbidden, "forbidden");
+    };
+
+    if profile_data.bio.len() > 150 {
+        return Custom(Status::BadRequest, "bio too long");
+    }
+
+    if profile_data.username.len() > 20 {
+        return Custom(Status::BadRequest, "username too long");
+    }
+
+    if profile_data.username.len() < 2 {
+        return Custom(Status::BadRequest, "username too short");
+    }
+
+    if !(crate::validate_user_name(&profile_data.username).await).valid {
+        return Custom(Status::BadRequest, "username invalid");
+    }
+
+    let pool = database::connect_db().await;
+
+    if database::change_bio(&s.email, &profile_data.bio, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    if database::change_username(&s.email, &profile_data.username, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    if database::change_icon(&s.email, &profile_data.icon, &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
     Custom(Status::Ok, "Ok")
 }

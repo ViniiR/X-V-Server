@@ -108,6 +108,8 @@ pub async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
                 if delete_user(&s.email, &pool).await.is_ok() {
                     cookies.remove_private("auth_key");
                     return Custom(Status::NoContent, "User deleted");
+                } else {
+                    return Custom(Status::InternalServerError, "InternalServerError");
                 }
             }
         }
