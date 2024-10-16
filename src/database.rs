@@ -8,6 +8,7 @@ use user::User;
 use crate::{
     auth::{hash::compare_password, Sub},
     routes::types::ClientUser,
+    PostData,
 };
 
 pub mod user;
@@ -442,4 +443,56 @@ pub async fn change_icon(email: &str, icon: &str, pool: &Pool<Postgres>) -> Resu
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn post(
+    owner_id: &i32,
+    text: &str,
+    image: &Option<String>,
+    unix_time: &i32,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    if image.is_none() {
+        sqlx::query!(
+            "INSERT INTO posts (owner_id, likescount, text, unix_time) VALUES ($1,$2,$3,$4)",
+            owner_id,
+            0,
+            text,
+            unix_time,
+        )
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query!(
+            "INSERT INTO posts (owner_id, likescount, text, image, unix_time) VALUES ($1,$2,$3,$4,$5)",
+            owner_id,
+            0,
+            text,
+            image.as_ref().unwrap().as_bytes(),
+            unix_time,
+        )
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Post {
+    pub text: Option<String>,
+    pub image: Option<Vec<u8>>,
+    pub owner_id: i32,
+    pub likescount: i32,
+    pub unix_time: i32,
+}
+
+pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
+    let res = sqlx::query_as!(
+        Post,
+        "SELECT text, image, owner_id, likescount, unix_time FROM posts ORDER BY unix_time DESC"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(res)
 }

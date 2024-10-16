@@ -5,14 +5,16 @@ mod routes;
 
 use core::str;
 
-use database::user::User;
+use auth::validate_jwt;
+use database::{get_email_from_id, user::User};
 use dotenv::dotenv;
 use regex::Regex;
 use rocket::{
-    http::Status,
+    http::{CookieJar, Status},
     response::status::Custom,
-    serde::{Deserialize, Serialize},
+    serde::{json::Json, Deserialize, Serialize},
 };
+use routes::types::DataResponse;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct LoginData {
@@ -176,6 +178,127 @@ pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom
     Ok(())
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PostData {
+    pub text: Option<String>,
+    pub image: Option<String>,
+    #[serde(rename = "unixTime")]
+    pub unix_time: isize,
+}
+
+#[post(
+    "/user/publish-post",
+    format = "application/json",
+    data = "<post_data>"
+)]
+async fn publish_post(post_data: Json<PostData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let data = post_data.into_inner();
+    const POST_MAX_CHAR_LENGTH: usize = 200;
+    let cookie = cookies.get_private("auth_key");
+    if data.text.is_none() && data.image.is_none() {
+        return Custom(Status::BadRequest, "Bad request, post was empty");
+    }
+    if data.text.is_some() && data.text.as_ref().unwrap().len() > POST_MAX_CHAR_LENGTH {
+        return Custom(Status::BadRequest, "Text too long");
+    }
+    if cookie.is_none() {
+        return Custom(Status::Forbidden, "Forbidden");
+    }
+
+    let Ok(s) = validate_jwt(cookie.unwrap().value()).await else {
+        return Custom(Status::Forbidden, "Forbidden");
+    };
+
+    let pool = database::connect_db().await;
+
+    let text = data.text.unwrap_or(String::from(""));
+    if database::post(&s.id, &text, &data.image, &(data.unix_time as i32), &pool)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+
+    Custom(Status::Ok, "Ok")
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResponsePost {
+    pub icon: String,
+    pub image: String,
+    #[serde(rename = "userName")]
+    pub username: String,
+    #[serde(rename = "userAt")]
+    pub user_at: String,
+    pub text: String,
+    #[serde(rename = "ownerId")]
+    pub owner_id: i32,
+    #[serde(rename = "likesCount")]
+    pub likes_count: i32,
+    #[serde(rename = "unixTime")]
+    pub unix_time: i32,
+    //#[serde(rename = "commentsCount")]
+    //pub comments_count: i32,
+}
+
+#[get("/user/fetch-posts", format = "application/json")]
+pub async fn fetch_posts(
+    cookies: &CookieJar<'_>,
+) -> DataResponse<Result<Vec<ResponsePost>, &'static str>> {
+    let pool = database::connect_db().await;
+    let Ok(posts) = database::get_posts(&pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+    let mut response_posts: Vec<ResponsePost> = vec![];
+    for p in posts {
+        let Ok(email) = get_email_from_id(&p.owner_id, &pool).await else {
+            return DataResponse {
+                status: Status::InternalServerError,
+                data: Json(Err("InternalServerError")),
+            };
+        };
+        let Ok(owner_data) = database::get_client_data(&email, &pool).await else {
+            return DataResponse {
+                status: Status::InternalServerError,
+                data: Json(Err("InternalServerError")),
+            };
+        };
+
+        response_posts.push(ResponsePost {
+            owner_id: p.owner_id,
+            unix_time: p.unix_time,
+            user_at: owner_data.userat,
+            username: owner_data.username,
+            likes_count: p.likescount,
+            icon: if owner_data.icon.is_some() {
+                let byte_array = owner_data.icon.unwrap_or(vec![]);
+                str::from_utf8(&byte_array).unwrap_or("").to_string()
+            } else {
+                String::from("")
+            },
+            text: if p.text.is_some() {
+                p.text.unwrap()
+            } else {
+                String::from("")
+            },
+            image: if p.image.is_some() {
+                let byte_array = p.image.unwrap_or(vec![]);
+                str::from_utf8(&byte_array).unwrap_or("").to_string()
+            } else {
+                String::from("")
+            },
+        });
+    }
+
+    DataResponse {
+        status: Status::Ok,
+        data: Json(Ok(response_posts)),
+    }
+}
+
 #[launch]
 async fn rocket() -> _ {
     dotenv().ok();
@@ -196,7 +319,9 @@ async fn rocket() -> _ {
             routes::change::change_password,
             routes::change::change_email,
             routes::change::change_user_at,
-            routes::change::follow_user
+            routes::change::follow_user,
+            publish_post,
+            fetch_posts
         ],
     )
 }
