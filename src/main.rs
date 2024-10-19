@@ -4,6 +4,7 @@ mod database;
 mod routes;
 
 use core::str;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use auth::validate_jwt;
 use database::{get_email_from_id, user::User};
@@ -182,8 +183,6 @@ pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom
 pub struct PostData {
     pub text: Option<String>,
     pub image: Option<String>,
-    #[serde(rename = "unixTime")]
-    pub unix_time: isize,
 }
 
 #[post(
@@ -192,6 +191,12 @@ pub struct PostData {
     data = "<post_data>"
 )]
 async fn publish_post(post_data: Json<PostData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let date = SystemTime::now();
+    let date: i64 = date
+        .duration_since(UNIX_EPOCH)
+        .expect("We're in 1969??")
+        .as_millis() as i64;
+
     let data = post_data.into_inner();
     const POST_MAX_CHAR_LENGTH: usize = 200;
     let cookie = cookies.get_private("auth_key");
@@ -212,7 +217,7 @@ async fn publish_post(post_data: Json<PostData>, cookies: &CookieJar<'_>) -> Cus
     let pool = database::connect_db().await;
 
     let text = data.text.unwrap_or(String::from(""));
-    if database::post(&s.id, &text, &data.image, &(data.unix_time as i32), &pool)
+    if database::post(&s.id, &text, &data.image, &date, &pool)
         .await
         .is_err()
     {
@@ -236,7 +241,7 @@ pub struct ResponsePost {
     #[serde(rename = "likesCount")]
     pub likes_count: i32,
     #[serde(rename = "unixTime")]
-    pub unix_time: i32,
+    pub unix_time: String,
     //#[serde(rename = "commentsCount")]
     //pub comments_count: i32,
 }
@@ -269,7 +274,7 @@ pub async fn fetch_posts(
 
         response_posts.push(ResponsePost {
             owner_id: p.owner_id,
-            unix_time: p.unix_time,
+            unix_time: p.unix_time.to_string(),
             user_at: owner_data.userat,
             username: owner_data.username,
             likes_count: p.likescount,

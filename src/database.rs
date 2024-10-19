@@ -449,7 +449,7 @@ pub async fn post(
     owner_id: &i32,
     text: &str,
     image: &Option<String>,
-    unix_time: &i32,
+    unix_time: &i64,
     pool: &Pool<Postgres>,
 ) -> Result<(), Error> {
     if image.is_none() {
@@ -484,7 +484,7 @@ pub struct Post {
     pub image: Option<Vec<u8>>,
     pub owner_id: i32,
     pub likescount: i32,
-    pub unix_time: i32,
+    pub unix_time: i64,
 }
 
 pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
