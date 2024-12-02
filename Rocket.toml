@@ -1,2 +1,5 @@
 [default]
 port = 5001
+
+[default.limits]
+json = "10MiB"

@@ -242,6 +242,8 @@ pub struct ResponsePost {
     pub likes_count: i32,
     #[serde(rename = "unixTime")]
     pub unix_time: String,
+    #[serde(rename = "postId")]
+    pub post_id: i32,
     //#[serde(rename = "commentsCount")]
     //pub comments_count: i32,
 }
@@ -274,6 +276,7 @@ pub async fn fetch_posts(
 
         response_posts.push(ResponsePost {
             owner_id: p.owner_id,
+            post_id: p.post_id,
             unix_time: p.unix_time.to_string(),
             user_at: owner_data.userat,
             username: owner_data.username,
@@ -304,6 +307,62 @@ pub async fn fetch_posts(
     }
 }
 
+#[get("/user/fetch-post/<post_id>", format = "application/json")]
+pub async fn fetch_post(post_id: i32) -> DataResponse<Result<ResponsePost, &'static str>> {
+    let pool = database::connect_db().await;
+    let post = if let Ok(p) = database::get_post_by_id(&pool, &post_id).await {
+        p
+    } else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+
+    let Ok(email) = get_email_from_id(&post.owner_id, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+    let Ok(owner_data) = database::get_client_data(&email, &pool).await else {
+        return DataResponse {
+            status: Status::InternalServerError,
+            data: Json(Err("InternalServerError")),
+        };
+    };
+    let response_post = ResponsePost {
+        owner_id: post.owner_id,
+        post_id: post.post_id,
+        unix_time: post.unix_time.to_string(),
+        user_at: owner_data.userat,
+        username: owner_data.username,
+        likes_count: post.likescount,
+        icon: if owner_data.icon.is_some() {
+            let byte_array = owner_data.icon.unwrap_or(vec![]);
+            str::from_utf8(&byte_array).unwrap_or("").to_string()
+        } else {
+            String::from("")
+        },
+        text: if post.text.is_some() {
+            post.text.unwrap()
+        } else {
+            String::from("")
+        },
+        image: if post.image.is_some() {
+            let byte_array = post.image.unwrap_or(vec![]);
+            str::from_utf8(&byte_array).unwrap_or("").to_string()
+        } else {
+            String::from("")
+        },
+    };
+
+    DataResponse {
+        status: Status::Ok,
+        data: Json(Ok(response_post)),
+    }
+}
+
 #[launch]
 async fn rocket() -> _ {
     dotenv().ok();
@@ -326,7 +385,8 @@ async fn rocket() -> _ {
             routes::change::change_user_at,
             routes::change::follow_user,
             publish_post,
-            fetch_posts
+            fetch_posts,
+            fetch_post
         ],
     )
 }

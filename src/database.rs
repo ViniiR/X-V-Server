@@ -485,14 +485,26 @@ pub struct Post {
     pub owner_id: i32,
     pub likescount: i32,
     pub unix_time: i64,
+    pub post_id: i32,
 }
 
 pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, likescount, unix_time FROM posts ORDER BY unix_time DESC"
+        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts ORDER BY unix_time DESC"
     )
     .fetch_all(pool)
+    .await?;
+    Ok(res)
+}
+
+pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post, Error> {
+    let res = sqlx::query_as!(
+        Post,
+        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts WHERE post_id = $1",
+        post_id
+    )
+    .fetch_one(pool)
     .await?;
     Ok(res)
 }
