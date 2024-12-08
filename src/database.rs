@@ -1,6 +1,6 @@
 use std::env::var;
 
-use rocket::{http::Status, response::status::Custom};
+use rocket::{form::validate::Contains, http::Status, response::status::Custom};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, query, query_as, Error, Pool, Postgres};
 use user::User;
@@ -507,4 +507,72 @@ pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post
     .fetch_one(pool)
     .await?;
     Ok(res)
+}
+
+pub async fn get_user_posts(pool: &Pool<Postgres>, owner_id: &i32) -> Result<Vec<Post>, Error> {
+    let res = sqlx::query_as!(
+        Post,
+        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts WHERE owner_id = $1 ORDER BY unix_time DESC",
+        owner_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(res)
+}
+
+pub async fn like(pool: &Pool<Postgres>, owner_id: &i32, post_id: &i32) -> Result<(), Error> {
+    sqlx::query!("UPDATE posts SET likescount = likescount + 1, likes = array_append(likes, $2) WHERE post_id = $1", post_id,owner_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn dislike(pool: &Pool<Postgres>, owner_id: &i32, post_id: &i32) -> Result<(), Error> {
+    sqlx::query!("UPDATE posts SET likescount = likescount - 1, likes = array_remove(likes, $2) WHERE post_id = $1", post_id,owner_id).execute(pool).await?;
+    Ok(())
+}
+
+pub struct PostId {
+    likes: Option<Vec<i32>>,
+}
+
+pub async fn post_likes_contains(
+    pool: &Pool<Postgres>,
+    post_id: &i32,
+    owner_id: &i32,
+) -> Result<bool, Error> {
+    let res = sqlx::query_as!(
+        PostId,
+        "SELECT likes FROM posts WHERE post_id = $1",
+        post_id
+    )
+    .fetch_one(pool)
+    .await?;
+    let Some(vec) = res.likes else {
+        return Ok(false);
+    };
+    if vec.contains(owner_id) {
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+struct LikesList {
+    likes: Option<Vec<i32>>,
+}
+
+pub async fn likes_list_contains(
+    pool: &Pool<Postgres>,
+    post_id: &i32,
+    user_id: &i32,
+) -> Result<bool, Error> {
+    let res = query_as!(
+        LikesList,
+        "SELECT likes FROM posts WHERE post_id = $1",
+        post_id
+    )
+    .fetch_one(pool)
+    .await?;
+    let Some(v) = res.likes else {
+        return Ok(false);
+    };
+    Ok(v.contains(user_id))
 }
