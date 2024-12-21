@@ -1,14 +1,14 @@
-use std::env::var;
+use std::{env::var, fmt::format};
 
 use rocket::{form::validate::Contains, http::Status, response::status::Custom};
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgPoolOptions, query, query_as, Error, Pool, Postgres};
+use sqlx::{postgres::PgPoolOptions, prelude::FromRow, query, query_as, Error, Pool, Postgres};
 use user::User;
 
 use crate::{
     auth::{hash::compare_password, Sub},
-    routes::types::ClientUser,
-    PostData,
+    routes::{types::ClientUser, user::PostData},
+    UserWithIcon,
 };
 
 pub mod user;
@@ -575,4 +575,42 @@ pub async fn likes_list_contains(
         return Ok(false);
     };
     Ok(v.contains(user_id))
+}
+
+#[derive(Debug, PartialEq, Eq, FromRow)]
+pub struct DBUserWithIcon {
+    pub username: String,
+    pub userat: String,
+    pub icon: Option<Vec<u8>>,
+}
+
+pub async fn query_like(query: &str, pool: &Pool<Postgres>) -> Result<Vec<DBUserWithIcon>, Error> {
+    //let user_at_query = format!(
+    //    "SELECT icon, userat, username FROM users WHERE {} LIKE '{}%'",
+    //    "userat", query
+    //);
+    //let username_query = format!(
+    //    "SELECT icon, userat, username FROM users WHERE {} LIKE '{}%'",
+    //    "username", query
+    //);
+    let user_at_res: Vec<DBUserWithIcon> = sqlx::query_as!(
+        DBUserWithIcon,
+        "SELECT icon, userat, username FROM users WHERE userat LIKE $1",
+        format!("%{query}%")
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut username_res: Vec<DBUserWithIcon> = sqlx::query_as!(
+        DBUserWithIcon,
+        "SELECT icon, userat, username FROM users WHERE username LIKE $1",
+        format!("%{query}%")
+    )
+    .fetch_all(pool)
+    .await?;
+    for i in user_at_res {
+        if !username_res.contains(&i) {
+            username_res.push(i);
+        }
+    }
+    Ok(username_res)
 }
