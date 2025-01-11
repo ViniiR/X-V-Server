@@ -1,6 +1,8 @@
 use std::{env::var, fmt::format};
 
-use rocket::{form::validate::Contains, http::Status, response::status::Custom};
+use rocket::{
+    form::validate::Contains, futures::future::ok, http::Status, response::status::Custom,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, prelude::FromRow, query, query_as, Error, Pool, Postgres};
 use user::User;
@@ -445,6 +447,48 @@ pub async fn change_icon(email: &str, icon: &str, pool: &Pool<Postgres>) -> Resu
     Ok(())
 }
 
+pub async fn comment(
+    owner_id: &i32,
+    text: &str,
+    image: &Option<String>,
+    unix_time: &i64,
+    pool: &Pool<Postgres>,
+    owner_post_id: &i32,
+) -> Result<(), Error> {
+    if image.is_none() {
+        sqlx::query!(
+            "INSERT INTO comments (owner_id, likescount, text, unix_time, owner_post_id) VALUES ($1,$2,$3,$4,$5)",
+            owner_id,
+            0,
+            text,
+            unix_time,
+            owner_post_id
+        )
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query!(
+            "INSERT INTO comments (owner_id, likescount, text, image, unix_time, owner_post_id) VALUES ($1,$2,$3,$4,$5,$6)",
+            owner_id,
+            0,
+            text,
+            image.as_ref().unwrap().as_bytes(),
+            unix_time,
+            owner_post_id
+        )
+        .execute(pool)
+        .await?;
+    }
+    sqlx::query!(
+        "UPDATE posts SET commentscount = commentscount + 1 WHERE post_id = $1",
+        owner_post_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn post(
     owner_id: &i32,
     text: &str,
@@ -484,6 +528,7 @@ pub struct Post {
     pub image: Option<Vec<u8>>,
     pub owner_id: i32,
     pub likescount: i32,
+    pub commentscount: i32,
     pub unix_time: i64,
     pub post_id: i32,
 }
@@ -491,7 +536,21 @@ pub struct Post {
 pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts ORDER BY unix_time DESC"
+        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts ORDER BY unix_time DESC"
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(res)
+}
+
+pub async fn get_comments_from_post(
+    pool: &Pool<Postgres>,
+    post_id: &i32,
+) -> Result<Vec<Post>, Error> {
+    let res = sqlx::query_as!(
+        Post,
+        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM comments WHERE owner_post_id = $1 ORDER BY unix_time DESC",
+        post_id
     )
     .fetch_all(pool)
     .await?;
@@ -501,7 +560,7 @@ pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
 pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts WHERE post_id = $1",
+        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE post_id = $1",
         post_id
     )
     .fetch_one(pool)
@@ -512,12 +571,30 @@ pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post
 pub async fn get_user_posts(pool: &Pool<Postgres>, owner_id: &i32) -> Result<Vec<Post>, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, unix_time FROM posts WHERE owner_id = $1 ORDER BY unix_time DESC",
+        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE owner_id = $1 ORDER BY unix_time DESC",
         owner_id
     )
     .fetch_all(pool)
     .await?;
     Ok(res)
+}
+
+pub async fn like_comment(
+    pool: &Pool<Postgres>,
+    owner_id: &i32,
+    post_id: &i32,
+) -> Result<(), Error> {
+    sqlx::query!("UPDATE comments SET likescount = likescount + 1, likes = array_append(likes, $2) WHERE post_id = $1", post_id,owner_id).execute(pool).await?;
+    Ok(())
+}
+
+pub async fn dislike_comment(
+    pool: &Pool<Postgres>,
+    owner_id: &i32,
+    post_id: &i32,
+) -> Result<(), Error> {
+    sqlx::query!("UPDATE comments SET likescount = likescount - 1, likes = array_remove(likes, $2) WHERE post_id = $1", post_id,owner_id).execute(pool).await?;
+    Ok(())
 }
 
 pub async fn like(pool: &Pool<Postgres>, owner_id: &i32, post_id: &i32) -> Result<(), Error> {
@@ -533,27 +610,27 @@ pub async fn dislike(pool: &Pool<Postgres>, owner_id: &i32, post_id: &i32) -> Re
 pub struct PostId {
     likes: Option<Vec<i32>>,
 }
-
-pub async fn post_likes_contains(
-    pool: &Pool<Postgres>,
-    post_id: &i32,
-    owner_id: &i32,
-) -> Result<bool, Error> {
-    let res = sqlx::query_as!(
-        PostId,
-        "SELECT likes FROM posts WHERE post_id = $1",
-        post_id
-    )
-    .fetch_one(pool)
-    .await?;
-    let Some(vec) = res.likes else {
-        return Ok(false);
-    };
-    if vec.contains(owner_id) {
-        return Ok(true);
-    }
-    Ok(false)
-}
+//
+//pub async fn post_likes_contains(
+//    pool: &Pool<Postgres>,
+//    post_id: &i32,
+//    owner_id: &i32,
+//) -> Result<bool, Error> {
+//    let res = sqlx::query_as!(
+//        PostId,
+//        "SELECT likes FROM posts WHERE post_id = $1",
+//        post_id
+//    )
+//    .fetch_one(pool)
+//    .await?;
+//    let Some(vec) = res.likes else {
+//        return Ok(false);
+//    };
+//    if vec.contains(owner_id) {
+//        return Ok(true);
+//    }
+//    Ok(false)
+//}
 
 struct LikesList {
     likes: Option<Vec<i32>>,
@@ -567,6 +644,24 @@ pub async fn likes_list_contains(
     let res = query_as!(
         LikesList,
         "SELECT likes FROM posts WHERE post_id = $1",
+        post_id
+    )
+    .fetch_one(pool)
+    .await?;
+    let Some(v) = res.likes else {
+        return Ok(false);
+    };
+    Ok(v.contains(user_id))
+}
+
+pub async fn comment_likes_list_contains(
+    pool: &Pool<Postgres>,
+    post_id: &i32,
+    user_id: &i32,
+) -> Result<bool, Error> {
+    let res = query_as!(
+        LikesList,
+        "SELECT likes FROM comments WHERE post_id = $1",
         post_id
     )
     .fetch_one(pool)
@@ -613,4 +708,30 @@ pub async fn query_like(query: &str, pool: &Pool<Postgres>) -> Result<Vec<DBUser
         }
     }
     Ok(username_res)
+}
+pub async fn delete_comment(
+    comment_id: &i32,
+    owner_post_id: &i32,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!("DELETE FROM comments WHERE post_id = $1", comment_id)
+        .execute(pool)
+        .await?;
+    sqlx::query!(
+        "UPDATE posts SET commentscount = commentscount - 1 WHERE post_id = $1",
+        owner_post_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_post(post_id: &i32, pool: &Pool<Postgres>) -> Result<(), Error> {
+    sqlx::query!("DELETE FROM posts WHERE post_id = $1", post_id)
+        .execute(pool)
+        .await?;
+    sqlx::query!("DELETE FROM comments WHERE owner_post_id = $1", post_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }

@@ -189,6 +189,8 @@ pub struct ResponsePost {
     pub owner_id: i32,
     #[serde(rename = "likesCount")]
     pub likes_count: i32,
+    #[serde(rename = "commentsCount")]
+    pub comments_count: i32,
     #[serde(rename = "unixTime")]
     pub unix_time: String,
     #[serde(rename = "postId")]
@@ -255,6 +257,7 @@ pub async fn fetch_posts(
             user_at: owner_data.userat,
             username: owner_data.username,
             likes_count: p.likescount,
+            comments_count: p.commentscount,
             icon: if owner_data.icon.is_some() {
                 let byte_array = owner_data.icon.unwrap_or(vec![]);
                 str::from_utf8(&byte_array).unwrap_or("").to_string()
@@ -337,6 +340,7 @@ pub async fn fetch_post(
         user_at: owner_data.userat,
         username: owner_data.username,
         likes_count: post.likescount,
+        comments_count: post.commentscount,
         icon: if owner_data.icon.is_some() {
             let byte_array = owner_data.icon.unwrap_or(vec![]);
             str::from_utf8(&byte_array).unwrap_or("").to_string()
@@ -364,12 +368,12 @@ pub async fn fetch_post(
 
 #[get("/user/fetch-user-posts/<user_at>", format = "application/json")]
 pub async fn fetch_user_posts(
-    user_at: String,
+    user_at: &str,
     cookies: &CookieJar<'_>,
 ) -> DataResponse<Result<Vec<ResponsePost>, &'static str>> {
     let pool = database::connect_db().await;
 
-    let email = if let Ok(e) = database::get_email_from_user_at(&user_at, &pool).await {
+    let email = if let Ok(e) = database::get_email_from_user_at(user_at, &pool).await {
         e
     } else {
         return DataResponse {
@@ -434,6 +438,7 @@ pub async fn fetch_user_posts(
             user_at: owner_data.userat,
             username: owner_data.username,
             likes_count: p.likescount,
+            comments_count: p.commentscount,
             icon: if owner_data.icon.is_some() {
                 let byte_array = owner_data.icon.unwrap_or(vec![]);
                 str::from_utf8(&byte_array).unwrap_or("").to_string()
@@ -465,6 +470,40 @@ pub struct LikeInfo {
     post_id: i32,
 }
 
+#[patch(
+    "/user/like-comment",
+    format = "application/json",
+    data = "<like_info>"
+)]
+pub async fn like_comment(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status {
+    let Some(jwt) = cookies.get_private("auth_key") else {
+        return Status::BadRequest;
+    };
+    let Ok(s) = validate_jwt(jwt.value()).await else {
+        return Status::BadRequest;
+    };
+    let like_info = like_info.into_inner();
+    let pool = database::connect_db().await;
+
+    let Ok(has_user_already_liked) =
+        database::comment_likes_list_contains(&pool, &like_info.post_id, &s.id).await
+    else {
+        return Status::InternalServerError;
+    };
+
+    if has_user_already_liked {
+        let Ok(()) = database::dislike_comment(&pool, &s.id, &like_info.post_id).await else {
+            return Status::InternalServerError;
+        };
+    } else {
+        let Ok(()) = database::like_comment(&pool, &s.id, &like_info.post_id).await else {
+            return Status::InternalServerError;
+        };
+    }
+
+    Status::Ok
+}
+
 #[patch("/user/like", format = "application/json", data = "<like_info>")]
 pub async fn like(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status {
     let Some(jwt) = cookies.get_private("auth_key") else {
@@ -477,7 +516,7 @@ pub async fn like(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status 
     let pool = database::connect_db().await;
 
     let Ok(has_user_already_liked) =
-        database::post_likes_contains(&pool, &like_info.post_id, &s.id).await
+        database::likes_list_contains(&pool, &like_info.post_id, &s.id).await
     else {
         return Status::InternalServerError;
     };
