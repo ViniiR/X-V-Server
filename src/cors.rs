@@ -1,5 +1,5 @@
 use rocket::fairing::{Fairing, Info, Kind};
-use rocket::http::{ContentType, Header, Method, Status};
+use rocket::http::Header;
 use rocket::{Request, Response};
 
 pub struct CORS;

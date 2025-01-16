@@ -7,7 +7,7 @@ use rocket::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{database::user::User, Claims, LoginData};
+use crate::Claims;
 
 pub mod hash;
 
@@ -32,7 +32,7 @@ pub async fn create_jwt(claims: Sub) -> Result<Cookie<'static>, Custom<&'static 
     match encode::<Claims>(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(&jwt_secret.as_ref()),
+        &EncodingKey::from_secret(jwt_secret.as_ref()),
     ) {
         Ok(t) => {
             let mut auth_cookie = Cookie::new("auth_key", t);

@@ -533,3 +533,117 @@ pub async fn like(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status 
 
     Status::Ok
 }
+
+#[patch(
+    "/user/comment/<owner_post_id>",
+    format = "application/json",
+    data = "<post_data>"
+)]
+pub async fn comment(
+    post_data: Json<PostData>,
+    owner_post_id: i32,
+    cookies: &CookieJar<'_>,
+) -> Custom<&'static str> {
+    let date = SystemTime::now();
+    let date: i64 = date
+        .duration_since(UNIX_EPOCH)
+        .expect("We've just stepped on the moon! :D")
+        .as_millis() as i64;
+
+    let data = post_data.into_inner();
+    const POST_MAX_CHAR_LENGTH: usize = 200;
+    let cookie = cookies.get_private("auth_key");
+    if data.text.is_none() && data.image.is_none() {
+        return Custom(Status::BadRequest, "Bad request, post was empty");
+    }
+    if data.text.is_some() && data.text.as_ref().unwrap().len() > POST_MAX_CHAR_LENGTH {
+        return Custom(Status::BadRequest, "Text too long");
+    }
+    if cookie.is_none() {
+        return Custom(Status::Forbidden, "Forbidden");
+    }
+
+    let Ok(s) = validate_jwt(cookie.unwrap().value()).await else {
+        return Custom(Status::Forbidden, "Forbidden");
+    };
+
+    let pool = database::connect_db().await;
+
+    let text = data.text.unwrap_or(String::from(""));
+    if database::comment(&s.id, &text, &data.image, &date, &pool, &owner_post_id)
+        .await
+        .is_err()
+    {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    };
+
+    Custom(Status::Ok, "Ok")
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeleteCommentData {
+    #[serde(rename = "commentId")]
+    comment_id: i32,
+    #[serde(rename = "ownerPostId")]
+    owner_post_id: i32,
+}
+
+#[delete(
+    "/user/delete-post-comment",
+    format = "application/json",
+    data = "<comment_delete_data>"
+)]
+pub async fn delete_comment(
+    comment_delete_data: Json<DeleteCommentData>,
+    cookies: &CookieJar<'_>,
+) -> Custom<&'static str> {
+    dbg!(&comment_delete_data);
+    let jwt = cookies.get_private("auth_key");
+    let Some(c) = jwt else {
+        return Custom(Status::BadRequest, "BadRequest");
+    };
+    let Ok(s) = validate_jwt(c.value()).await else {
+        return Custom(Status::BadRequest, "BadRequest");
+    };
+    let comment_delete_data = comment_delete_data.into_inner();
+
+    let pool = crate::database::connect_db().await;
+    if user_has_credentials(&s, &pool).await {
+        if database::delete_comment(
+            &comment_delete_data.comment_id,
+            &comment_delete_data.owner_post_id,
+            &pool,
+        )
+        .await
+        .is_ok()
+        {
+            Custom(Status::NoContent, "Comment deleted")
+        } else {
+            Custom(Status::InternalServerError, "InternalServerError")
+        }
+    } else {
+        Custom(Status::BadRequest, "BadRequest")
+    }
+}
+
+#[delete("/user/delete-post/<post_id>")]
+pub async fn delete_post(post_id: i32, cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    let Some(c) = jwt else {
+        return Custom(Status::BadRequest, "BadRequest");
+    };
+    let Ok(s) = validate_jwt(c.value()).await else {
+        return Custom(Status::BadRequest, "BadRequest");
+    };
+
+    let pool = crate::database::connect_db().await;
+    if user_has_credentials(&s, &pool).await {
+        if database::delete_post(&post_id, &pool).await.is_ok() {
+            Custom(Status::NoContent, "Post deleted")
+        } else {
+            Custom(Status::InternalServerError, "InternalServerError")
+        }
+    } else {
+        Custom(Status::BadRequest, "BadRequest")
+    }
+}

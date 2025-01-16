@@ -1,16 +1,13 @@
-use std::{env::var, fmt::format};
+use std::env::var;
 
-use rocket::{
-    form::validate::Contains, futures::future::ok, http::Status, response::status::Custom,
-};
+use rocket::{form::validate::Contains, http::Status, response::status::Custom};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, prelude::FromRow, query, query_as, Error, Pool, Postgres};
 use user::User;
 
 use crate::{
     auth::{hash::compare_password, Sub},
-    routes::{types::ClientUser, user::PostData},
-    UserWithIcon,
+    routes::types::ClientUser,
 };
 
 pub mod user;
@@ -606,31 +603,6 @@ pub async fn dislike(pool: &Pool<Postgres>, owner_id: &i32, post_id: &i32) -> Re
     sqlx::query!("UPDATE posts SET likescount = likescount - 1, likes = array_remove(likes, $2) WHERE post_id = $1", post_id,owner_id).execute(pool).await?;
     Ok(())
 }
-
-pub struct PostId {
-    likes: Option<Vec<i32>>,
-}
-//
-//pub async fn post_likes_contains(
-//    pool: &Pool<Postgres>,
-//    post_id: &i32,
-//    owner_id: &i32,
-//) -> Result<bool, Error> {
-//    let res = sqlx::query_as!(
-//        PostId,
-//        "SELECT likes FROM posts WHERE post_id = $1",
-//        post_id
-//    )
-//    .fetch_one(pool)
-//    .await?;
-//    let Some(vec) = res.likes else {
-//        return Ok(false);
-//    };
-//    if vec.contains(owner_id) {
-//        return Ok(true);
-//    }
-//    Ok(false)
-//}
 
 struct LikesList {
     likes: Option<Vec<i32>>,

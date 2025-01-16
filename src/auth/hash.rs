@@ -8,15 +8,12 @@ pub async fn hash_str(str: &str) -> Result<String, ()> {
 
     thread_rng().fill_bytes(&mut salt);
 
-    match hash_encoded(&str, &salt, &argon2) {
+    match hash_encoded(str, &salt, &argon2) {
         Ok(s) => Ok(s),
         Err(..) => Err(()),
     }
 }
 
 pub async fn compare_password(password: &str, hash: &str) -> bool {
-    match verify_encoded(hash, password.as_bytes()) {
-        Ok(t) => t,
-        Err(..) => false,
-    }
+    verify_encoded(hash, password.as_bytes()).unwrap_or(false)
 }

@@ -18,13 +18,13 @@ pub async fn change_password(
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
     let jwt = cookies.get_private("auth_key");
-    if let None = jwt {
+    if jwt.is_none() {
         return Custom(Status::Forbidden, "Unauthorized user");
     }
     let jwt = jwt.unwrap();
     let data = form_data.into_inner();
 
-    match validate_jwt(&jwt.value()).await {
+    match validate_jwt(jwt.value()).await {
         Ok(s) => {
             let pool = database::connect_db().await;
 
