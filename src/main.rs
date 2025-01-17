@@ -12,6 +12,7 @@ use rocket::{
     http::Status,
     response::status::Custom,
     serde::{Deserialize, Serialize},
+    Config,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -179,7 +180,10 @@ pub async fn validate_minimal_user_credentials(user: &User) -> Result<(), Custom
 #[launch]
 async fn rocket() -> _ {
     dotenv().ok();
-    rocket::build().attach(cors::CORS).mount(
+    let config = Config::figment()
+        .merge(("port", 10_000))
+        .merge(("address", "0.0.0.0"));
+    rocket::custom(config).attach(cors::CORS).mount(
         "/",
         routes![
             routes::user::create,

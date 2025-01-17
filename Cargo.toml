@@ -11,5 +11,8 @@ regex = "1.10.6"
 rocket = {version="0.5.1", features = ["json", "secrets"]}
 rust-argon2 = "2.1.0"
 serde = "1.0.210"
-sqlx = {version="0.8.2", features = ["postgres", "runtime-tokio"]}
+sqlx = { version = "0.8.2", features = ["postgres", "runtime-tokio", "runtime-tokio-native-tls"] }
 tokio = { version = "1.40.0", features = ["full"] }
+shuttle-runtime = "*"
+shuttle-rocket = "*"
+rustls = "0.23.21"

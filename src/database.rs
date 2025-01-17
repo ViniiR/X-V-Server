@@ -14,11 +14,21 @@ pub mod user;
 
 pub async fn connect_db() -> Pool<Postgres> {
     let connection_str: &str = &var("DATABASE_URL").unwrap();
+    //let mut client_config = ClientConfig::new();
+    //let client_config = Arc::new(client_config);
+
+    //let options = PgConnectOptions::from_str(connection_str)
+    //    .expect("unable to connect to database")
+    //    .ssl_mode(PgSslMode::Require);
+
     PgPoolOptions::new()
         .max_connections(10)
         .connect(connection_str)
         .await
         .expect("unable to connect to database")
+    //PgPool::connect_with(options)
+    //    .await
+    //    .expect("unable to connect to database")
 }
 
 pub async fn user_exists(user_at: &str, pool: &Pool<Postgres>) -> bool {
