@@ -1,4 +1,4 @@
-use std::env::var;
+use std::{env::var, time::Duration};
 
 use rocket::{form::validate::Contains, http::Status, response::status::Custom};
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,7 @@ pub async fn connect_db() -> Pool<Postgres> {
 
     PgPoolOptions::new()
         .max_connections(10)
+        .max_lifetime(Duration::new(30, 0))
         .connect(connection_str)
         .await
         .expect("unable to connect to database")
@@ -117,6 +118,7 @@ pub struct FollowingDBData {
 }
 
 pub async fn get_email_from_id(id: &i32, pool: &Pool<Postgres>) -> Result<String, Error> {
+    println!("user_id is: {}", &id);
     let email = sqlx::query!("SELECT email FROM users WHERE id = $1", id)
         .fetch_one(pool)
         .await?;

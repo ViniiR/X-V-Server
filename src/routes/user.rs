@@ -207,13 +207,22 @@ pub async fn fetch_posts(
 ) -> DataResponse<Result<Vec<ResponsePost>, &'static str>> {
     let pool = database::connect_db().await;
 
-    let Ok(posts) = database::get_posts(&pool).await else {
-        println!("DB QUERY FAILED line 211 user.rs");
-        return DataResponse {
-            status: Status::InternalServerError,
-            data: Json(Err("InternalServerError")),
-        };
+    let posts = match database::get_posts(&pool).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e.to_string());
+            return DataResponse {
+                status: Status::InternalServerError,
+                data: Json(Err("InternalServerError")),
+            };
+        }
     };
+    //let Ok(posts) = database::get_posts(&pool).await else {
+    //return DataResponse {
+    //    status: Status::InternalServerError,
+    //    data: Json(Err("InternalServerError")),
+    //};
+    //};
     let mut response_posts: Vec<ResponsePost> = vec![];
 
     let mut owner_id: Option<i32> = None;
@@ -225,13 +234,18 @@ pub async fn fetch_posts(
     };
 
     for p in posts {
-        let Ok(email) = database::get_email_from_id(&p.owner_id, &pool).await else {
-            return DataResponse {
-                status: Status::InternalServerError,
-                data: Json(Err("InternalServerError")),
-            };
+        let email = match database::get_email_from_id(&p.owner_id, &pool).await {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("{}", e);
+                return DataResponse {
+                    status: Status::InternalServerError,
+                    data: Json(Err("InternalServerError")),
+                };
+            }
         };
         let Ok(owner_data) = database::get_client_data(&email, &pool).await else {
+            eprintln!("err 245");
             return DataResponse {
                 status: Status::InternalServerError,
                 data: Json(Err("InternalServerError")),
@@ -243,6 +257,7 @@ pub async fn fetch_posts(
         } else {
             let Ok(c) = database::likes_list_contains(&pool, &p.post_id, &owner_id.unwrap()).await
             else {
+                eprintln!("err 257");
                 return DataResponse {
                     status: Status::InternalServerError,
                     data: Json(Err("InternalServerError")),
