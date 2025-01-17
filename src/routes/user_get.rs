@@ -21,7 +21,7 @@ pub async fn get_profile_data(
     user_at: &str,
     cookies: &CookieJar<'_>,
 ) -> DataResponse<Result<ProfileData, &'static str>> {
-    let jwt = cookies.get_private("auth_key");
+    let jwt = cookies.get("auth_key");
     let mut is_following = false;
     let mut is_himself = false;
 
@@ -106,7 +106,7 @@ pub async fn get_profile_data(
 
 #[get("/user/data", format = "application/json")]
 pub async fn get_data(cookies: &CookieJar<'_>) -> DataResponse<String> {
-    let jwt = cookies.get_private("auth_key");
+    let jwt = cookies.get("auth_key");
 
     if jwt.is_none() {
         return DataResponse {
@@ -300,7 +300,7 @@ pub async fn fetch_comments(
 
     let mut owner_id: Option<i32> = None;
 
-    if let Some(jwt) = cookies.get_private("auth_key") {
+    if let Some(jwt) = cookies.get("auth_key") {
         if let Ok(s) = validate_jwt(jwt.value()).await {
             owner_id = Some(s.id);
         };

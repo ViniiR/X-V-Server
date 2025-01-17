@@ -37,7 +37,7 @@ pub async fn create_jwt(claims: Sub) -> Result<Cookie<'static>, Custom<&'static 
         Ok(t) => {
             let mut auth_cookie = Cookie::new("auth_key", t);
 
-            auth_cookie.set_http_only(true);
+            auth_cookie.set_http_only(false);
             let mut now = OffsetDateTime::now_utc();
             now += Duration::weeks(1);
 
