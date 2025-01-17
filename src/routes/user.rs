@@ -208,6 +208,7 @@ pub async fn fetch_posts(
     let pool = database::connect_db().await;
 
     let Ok(posts) = database::get_posts(&pool).await else {
+        println!("DB QUERY FAILED line 211 user.rs")
         return DataResponse {
             status: Status::InternalServerError,
             data: Json(Err("InternalServerError")),
