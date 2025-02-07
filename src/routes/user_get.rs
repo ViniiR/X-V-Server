@@ -287,7 +287,6 @@ pub async fn fetch_comments(
     cookies: &CookieJar<'_>,
     post_id: i32,
 ) -> DataResponse<Result<Vec<ResponsePost>, &'static str>> {
-    dbg!(post_id);
     let pool = crate::database::connect_db().await;
 
     let Ok(posts) = crate::database::get_comments_from_post(&pool, &post_id).await else {

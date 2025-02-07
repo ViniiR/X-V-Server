@@ -209,8 +209,7 @@ pub async fn fetch_posts(
 
     let posts = match database::get_posts(&pool).await {
         Ok(p) => p,
-        Err(e) => {
-            eprintln!("{}", e.to_string());
+        Err(..) => {
             return DataResponse {
                 status: Status::InternalServerError,
                 data: Json(Err("InternalServerError")),
@@ -236,8 +235,7 @@ pub async fn fetch_posts(
     for p in posts {
         let email = match database::get_email_from_id(&p.owner_id, &pool).await {
             Ok(e) => e,
-            Err(e) => {
-                eprintln!("{}", e);
+            Err(..) => {
                 return DataResponse {
                     status: Status::InternalServerError,
                     data: Json(Err("InternalServerError")),
@@ -245,7 +243,6 @@ pub async fn fetch_posts(
             }
         };
         let Ok(owner_data) = database::get_client_data(&email, &pool).await else {
-            eprintln!("err 245");
             return DataResponse {
                 status: Status::InternalServerError,
                 data: Json(Err("InternalServerError")),
@@ -257,7 +254,6 @@ pub async fn fetch_posts(
         } else {
             let Ok(c) = database::likes_list_contains(&pool, &p.post_id, &owner_id.unwrap()).await
             else {
-                eprintln!("err 257");
                 return DataResponse {
                     status: Status::InternalServerError,
                     data: Json(Err("InternalServerError")),
@@ -613,7 +609,6 @@ pub async fn delete_comment(
     comment_delete_data: Json<DeleteCommentData>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    dbg!(&comment_delete_data);
     let jwt = cookies.get("auth_key");
     let Some(c) = jwt else {
         return Custom(Status::BadRequest, "BadRequest");

@@ -105,7 +105,6 @@ pub async fn verify_password(email: &str, password: &str, pool: &Pool<Postgres>)
     {
         Ok(record) => {
             let p: String = record.password;
-            dbg!(compare_password(password, &p).await);
             compare_password(password, &p).await
         }
         Err(..) => false,
@@ -118,7 +117,6 @@ pub struct FollowingDBData {
 }
 
 pub async fn get_email_from_id(id: &i32, pool: &Pool<Postgres>) -> Result<String, Error> {
-    println!("user_id is: {}", &id);
     let email = sqlx::query!("SELECT email FROM users WHERE id = $1", id)
         .fetch_one(pool)
         .await?;

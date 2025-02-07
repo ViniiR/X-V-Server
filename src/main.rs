@@ -84,7 +84,7 @@ async fn validate_user_at(user_at: &str) -> ValidField {
         if c == '_' {
             return;
         }
-        if (!c.is_ascii_alphabetic() && !c.is_numeric() && !is_brazilian(c)) || is_spanish(c) {
+        if (!c.is_ascii_alphabetic() && !c.is_ascii_digit() && !is_brazilian(c)) || is_spanish(c) {
             is_valid = false;
             message = "user_at invalid character";
         }
