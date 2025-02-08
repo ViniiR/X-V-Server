@@ -672,14 +672,14 @@ pub async fn query_like(query: &str, pool: &Pool<Postgres>) -> Result<Vec<DBUser
     //);
     let user_at_res: Vec<DBUserWithIcon> = sqlx::query_as!(
         DBUserWithIcon,
-        "SELECT icon, userat, username FROM users WHERE userat LIKE $1",
+        "SELECT icon, userat, username FROM users WHERE LOWER(userat) LIKE LOWER($1)",
         format!("%{query}%")
     )
     .fetch_all(pool)
     .await?;
     let mut username_res: Vec<DBUserWithIcon> = sqlx::query_as!(
         DBUserWithIcon,
-        "SELECT icon, userat, username FROM users WHERE username LIKE $1",
+        "SELECT icon, userat, username FROM users WHERE LOWER(username) LIKE LOWER($1)",
         format!("%{query}%")
     )
     .fetch_all(pool)

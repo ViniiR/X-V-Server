@@ -111,7 +111,7 @@ async fn validate_email(email: &str) -> ValidField {
     let regex = Regex::new(EMAIL_REGEX).unwrap();
 
     if !regex.is_match(email) {
-        message = "email invalid email";
+        message = "invalid email";
         is_valid = false;
     }
     //todo!("send EMAIL for verification");
