@@ -17,7 +17,7 @@ pub async fn change_password(
     form_data: Json<PasswordChangeData>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     if jwt.is_none() {
         return Custom(Status::Forbidden, "Unauthorized user");
     }
@@ -69,7 +69,7 @@ pub async fn change_email(
     form_data: Json<EmailChangeData>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     if let None = jwt {
         return Custom(Status::Forbidden, "Unauthorized user");
     }
@@ -104,7 +104,7 @@ pub async fn change_email(
                 .await
                 {
                     Ok(c) => {
-                        cookies.add(c);
+                        cookies.add_private(c);
                         return Custom(Status::Ok, "Email changed succesfully");
                     }
                     Err(..) => {
@@ -127,7 +127,7 @@ pub async fn change_user_at(
     form_data: Json<UserAtChangeData>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
 
     if let None = jwt {
         return Custom(Status::Forbidden, "Unauthorized user");
@@ -164,7 +164,7 @@ pub async fn change_user_at(
                 .await
                 {
                     Ok(c) => {
-                        cookies.add(c);
+                        cookies.add_private(c);
                         return Custom(Status::Ok, "User_at changed succesfully");
                     }
                     Err(..) => {
@@ -188,7 +188,7 @@ pub struct FollowData {
 
 #[patch("/user/follow", format = "application/json", data = "<data>")]
 pub async fn follow_user(data: Json<FollowData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     let data = data.into_inner();
 
     let Some(cookie) = jwt else {
@@ -244,7 +244,7 @@ pub async fn change_profile(
     profile_data: Json<ProfileUpdate>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     if jwt.is_none() {
         return Custom(Status::Forbidden, "forbidden");
     }

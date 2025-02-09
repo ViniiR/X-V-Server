@@ -20,9 +20,9 @@ use super::types::DataResponse;
 
 #[post("/user/log-out")]
 pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    match cookies.get("auth_key") {
+    match cookies.get_private("auth_key") {
         Some(c) => {
-            cookies.remove(c.to_owned());
+            cookies.remove_private(c.to_owned());
             Custom(Status::Ok, "Cookie removed")
         }
         None => Custom(
@@ -58,7 +58,7 @@ pub async fn create(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'
             match claims {
                 Ok(c) => match create_jwt(c).await {
                     Ok(c) => {
-                        cookies.add(c);
+                        cookies.add_private(c);
                         Custom(Status::Created, "User created")
                     }
                     Err(e) => e,
@@ -98,7 +98,7 @@ pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custo
     match claims {
         Ok(c) => match create_jwt(c).await {
             Ok(c) => {
-                cookies.add(c);
+                cookies.add_private(c);
                 Custom(Status::Ok, "Ok")
             }
             Err(e) => e,
@@ -109,13 +109,13 @@ pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custo
 
 #[delete("/user/delete")]
 pub async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     if let Some(c) = jwt {
         if let Ok(s) = validate_jwt(c.value()).await {
             let pool = crate::database::connect_db().await;
             if user_has_credentials(&s, &pool).await {
                 if delete_user(&s.email, &pool).await.is_ok() {
-                    cookies.remove("auth_key");
+                    cookies.remove_private("auth_key");
                     return Custom(Status::NoContent, "User deleted");
                 } else {
                     return Custom(Status::InternalServerError, "InternalServerError");
@@ -150,7 +150,7 @@ pub async fn publish_post(
 
     let data = post_data.into_inner();
     const POST_MAX_CHAR_LENGTH: usize = 200;
-    let cookie = cookies.get("auth_key");
+    let cookie = cookies.get_private("auth_key");
     if data.text.is_none() && data.image.is_none() {
         return Custom(Status::BadRequest, "Bad request, post was empty");
     }
@@ -228,7 +228,7 @@ pub async fn fetch_posts(
 
     let mut owner_id: Option<i32> = None;
 
-    if let Some(jwt) = cookies.get("auth_key") {
+    if let Some(jwt) = cookies.get_private("auth_key") {
         if let Ok(s) = validate_jwt(jwt.value()).await {
             owner_id = Some(s.id);
         };
@@ -328,7 +328,7 @@ pub async fn fetch_post(
 
     let mut owner_id: Option<i32> = None;
 
-    if let Some(jwt) = cookies.get("auth_key") {
+    if let Some(jwt) = cookies.get_private("auth_key") {
         if let Ok(s) = validate_jwt(jwt.value()).await {
             owner_id = Some(s.id);
         };
@@ -412,7 +412,7 @@ pub async fn fetch_user_posts(
 
     let mut owner_id: Option<i32> = None;
 
-    if let Some(jwt) = cookies.get("auth_key") {
+    if let Some(jwt) = cookies.get_private("auth_key") {
         if let Ok(s) = validate_jwt(jwt.value()).await {
             owner_id = Some(s.id);
         };
@@ -490,7 +490,7 @@ pub struct LikeInfo {
     data = "<like_info>"
 )]
 pub async fn like_comment(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status {
-    let Some(jwt) = cookies.get("auth_key") else {
+    let Some(jwt) = cookies.get_private("auth_key") else {
         return Status::BadRequest;
     };
     let Ok(s) = validate_jwt(jwt.value()).await else {
@@ -520,7 +520,7 @@ pub async fn like_comment(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) ->
 
 #[patch("/user/like", format = "application/json", data = "<like_info>")]
 pub async fn like(cookies: &CookieJar<'_>, like_info: Json<LikeInfo>) -> Status {
-    let Some(jwt) = cookies.get("auth_key") else {
+    let Some(jwt) = cookies.get_private("auth_key") else {
         return Status::BadRequest;
     };
     let Ok(s) = validate_jwt(jwt.value()).await else {
@@ -566,7 +566,7 @@ pub async fn comment(
 
     let data = post_data.into_inner();
     const POST_MAX_CHAR_LENGTH: usize = 200;
-    let cookie = cookies.get("auth_key");
+    let cookie = cookies.get_private("auth_key");
     if data.text.is_none() && data.image.is_none() {
         return Custom(Status::BadRequest, "Bad request, post was empty");
     }
@@ -611,7 +611,7 @@ pub async fn delete_comment(
     comment_delete_data: Json<DeleteCommentData>,
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     let Some(c) = jwt else {
         return Custom(Status::BadRequest, "BadRequest");
     };
@@ -641,7 +641,7 @@ pub async fn delete_comment(
 
 #[delete("/user/delete-post/<post_id>")]
 pub async fn delete_post(post_id: i32, cookies: &CookieJar<'_>) -> Custom<&'static str> {
-    let jwt = cookies.get("auth_key");
+    let jwt = cookies.get_private("auth_key");
     let Some(c) = jwt else {
         return Custom(Status::BadRequest, "BadRequest");
     };
