@@ -9,6 +9,8 @@ use crate::database::{
 };
 use crate::{validate_email, validate_minimal_user_credentials, validate_password, LoginData};
 use core::str;
+use rocket::http::{Cookie, SameSite};
+use rocket::time::{Duration, OffsetDateTime};
 use rocket::{
     http::{CookieJar, Status},
     response::status::Custom,
@@ -20,9 +22,23 @@ use super::types::DataResponse;
 
 #[post("/user/log-out")]
 pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {
+    let mut mock_cookie = Cookie::new("auth_key", "none");
+
+    mock_cookie.set_http_only(true);
+    let mut now = OffsetDateTime::now_utc();
+    now += Duration::weeks(1);
+
+    mock_cookie.set_expires(now);
+    mock_cookie.set_secure(true);
+    mock_cookie.set_same_site(SameSite::None);
+    mock_cookie.set_path("/");
     match cookies.get_private("auth_key") {
-        Some(c) => {
-            cookies.remove_private(c.to_owned());
+        Some(..) => {
+            //cookies.remove_private(c.to_owned());
+            //cookies.remove(c);
+            //cookies.remove(Cookie::from("auth_key"));
+            //cookies.remove_private(Cookie::from("auth_key"));
+            cookies.add_private(mock_cookie);
             Custom(Status::Ok, "Cookie removed")
         }
         None => Custom(
@@ -110,12 +126,27 @@ pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custo
 #[delete("/user/delete")]
 pub async fn delete(cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let jwt = cookies.get_private("auth_key");
+
+    let mut mock_cookie = Cookie::new("auth_key", "none");
+
+    mock_cookie.set_http_only(true);
+    let mut now = OffsetDateTime::now_utc();
+    now += Duration::weeks(1);
+
+    mock_cookie.set_expires(now);
+    mock_cookie.set_secure(true);
+    mock_cookie.set_same_site(SameSite::None);
+    mock_cookie.set_path("/");
     if let Some(c) = jwt {
         if let Ok(s) = validate_jwt(c.value()).await {
             let pool = crate::database::connect_db().await;
             if user_has_credentials(&s, &pool).await {
                 if delete_user(&s.email, &pool).await.is_ok() {
-                    cookies.remove_private("auth_key");
+                    //cookies.remove_private(c.to_owned());
+                    //cookies.remove(c);
+                    //cookies.remove(Cookie::from("auth_key"));
+                    //cookies.remove_private(Cookie::from("auth_key"));
+                    cookies.add_private(mock_cookie);
                     return Custom(Status::NoContent, "User deleted");
                 } else {
                     return Custom(Status::InternalServerError, "InternalServerError");
