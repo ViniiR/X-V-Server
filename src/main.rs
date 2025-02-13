@@ -30,8 +30,6 @@ struct ValidField {
 
 #[macro_use]
 extern crate rocket;
-const EMAIL_REGEX: &str =
-    r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})$";
 
 async fn validate_user_name(user_name: &str) -> ValidField {
     let mut is_valid: bool = true;
@@ -103,6 +101,8 @@ async fn validate_user_at(user_at: &str) -> ValidField {
     }
 }
 
+const EMAIL_REGEX: &str =
+    r"^([a-z0-9_+]([a-z0-9_+.]*[a-z0-9_+])?)@([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6})$";
 async fn validate_email(email: &str) -> ValidField {
     let mut is_valid = true;
     let mut message = "";

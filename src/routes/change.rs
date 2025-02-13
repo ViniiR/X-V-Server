@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     auth::{create_jwt, hash::hash_str, validate_jwt, Sub},
     database::{self, email_exists, user_exists, user_has_credentials, verify_password},
-    validate_user_at,
+    validate_email, validate_password, validate_user_at,
 };
 
 use super::types::{EmailChangeData, PasswordChangeData, ProfileUpdate, UserAtChangeData};
@@ -24,6 +24,13 @@ pub async fn change_password(
     }
     let jwt = jwt.unwrap();
     let data = form_data.into_inner();
+
+    // TODO(MAYBE) add separate messages for old and new password although i dont think its
+    // necessary
+    let valid_password = validate_password(&data.new_password).await;
+    if !valid_password.valid {
+        return Custom(Status::BadRequest, valid_password.message);
+    }
 
     match validate_jwt(jwt.value()).await {
         Ok(s) => {
@@ -46,12 +53,15 @@ pub async fn change_password(
             }
 
             let hashed_new_password = hash_str(&data.new_password).await;
-            if let Err(..) = hashed_new_password {
+            if hashed_new_password.is_err() {
                 return Custom(Status::InternalServerError, "InternalServerError");
             }
             let hashed_new_password = hashed_new_password.unwrap();
 
-            if let Ok(..) = database::change_password(email, &hashed_new_password, &pool).await {
+            if database::change_password(email, &hashed_new_password, &pool)
+                .await
+                .is_ok()
+            {
                 return Custom(Status::Ok, "Password changed succesfully");
             }
 
@@ -71,14 +81,20 @@ pub async fn change_email(
     cookies: &CookieJar<'_>,
 ) -> Custom<&'static str> {
     let jwt = cookies.get_private("auth_key");
-    if let None = jwt {
+    if jwt.is_none() {
         return Custom(Status::Forbidden, "Unauthorized user");
     }
 
     let jwt = jwt.unwrap();
-    let data = form_data.into_inner();
+    let mut data = form_data.into_inner();
+    data.email = data.email.to_lowercase();
 
-    match validate_jwt(&jwt.value()).await {
+    let valid_email = validate_email(&data.email).await;
+    if !valid_email.valid {
+        return Custom(Status::BadRequest, valid_email.message);
+    }
+
+    match validate_jwt(jwt.value()).await {
         Ok(s) => {
             let pool = database::connect_db().await;
             if !user_has_credentials(&s, &pool).await {
@@ -130,18 +146,22 @@ pub async fn change_user_at(
 ) -> Custom<&'static str> {
     let jwt = cookies.get_private("auth_key");
 
-    if let None = jwt {
+    if jwt.is_none() {
         return Custom(Status::Forbidden, "Unauthorized user");
     }
 
     let jwt = jwt.unwrap();
-    let data = form_data.into_inner();
-
-    if !validate_user_at(&data.user_at).await.valid {
-        return Custom(Status::BadRequest, "New userat contains invalid characters");
+    let mut data = form_data.into_inner();
+    if data.user_at.starts_with('@') {
+        data.user_at.remove(0);
     }
 
-    match validate_jwt(&jwt.value()).await {
+    let valid_user_at = validate_user_at(&data.user_at).await;
+    if !valid_user_at.valid {
+        return Custom(Status::BadRequest, valid_user_at.message);
+    }
+
+    match validate_jwt(jwt.value()).await {
         Ok(s) => {
             let pool = database::connect_db().await;
 
