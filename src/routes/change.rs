@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     auth::{create_jwt, hash::hash_str, validate_jwt, Sub},
     database::{self, email_exists, user_exists, user_has_credentials, verify_password},
+    validate_user_at,
 };
 
 use super::types::{EmailChangeData, PasswordChangeData, ProfileUpdate, UserAtChangeData};
@@ -135,6 +136,10 @@ pub async fn change_user_at(
 
     let jwt = jwt.unwrap();
     let data = form_data.into_inner();
+
+    if !validate_user_at(&data.user_at).await.valid {
+        return Custom(Status::BadRequest, "New userat contains invalid characters");
+    }
 
     match validate_jwt(&jwt.value()).await {
         Ok(s) => {
