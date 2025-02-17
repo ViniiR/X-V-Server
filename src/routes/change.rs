@@ -152,6 +152,7 @@ pub async fn change_user_at(
 
     let jwt = jwt.unwrap();
     let mut data = form_data.into_inner();
+    data.user_at = data.user_at.to_lowercase();
     if data.user_at.starts_with('@') {
         data.user_at.remove(0);
     }

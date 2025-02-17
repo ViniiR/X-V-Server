@@ -52,6 +52,7 @@ pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {
 pub async fn create(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let mut data: User = form_data.into_inner();
     data.email = data.email.to_lowercase();
+    data.user_at = data.user_at.to_lowercase();
 
     if let Err(e) = validate_minimal_user_credentials(&data).await {
         return e;
