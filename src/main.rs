@@ -28,6 +28,14 @@ struct ValidField {
     message: &'static str,
 }
 
+pub const USER_NAME_MIN_LEN: usize = 2;
+pub const USER_NAME_MAX_LEN: usize = 20;
+pub const USER_AT_MIN_LEN: usize = 2;
+pub const USER_AT_MAX_LEN: usize = 20;
+pub const PASSWORD_MIN_LEN: usize = 8;
+pub const PASSWORD_MAX_LEN: usize = 32;
+pub const BIO_MAX_LEN: usize = 150;
+
 #[macro_use]
 extern crate rocket;
 
@@ -35,17 +43,17 @@ async fn validate_user_name(user_name: &str) -> ValidField {
     let mut is_valid: bool = true;
     let mut message: &str = "";
     let user_name = user_name.trim();
-    user_name.chars().for_each(|c| {
-        if (!c.is_alphanumeric() && !is_brazilian(c)) || is_spanish(c) {
-            is_valid = false;
-            message = "username invalid character";
-        }
-    });
-    if user_name.len() < 2 {
+    //user_name.chars().for_each(|c| {
+    //    if (!c.is_alphanumeric() && !is_brazilian(c)) || is_spanish(c) {
+    //        is_valid = false;
+    //        message = "username invalid character";
+    //    }
+    //});
+    if user_name.chars().count() < USER_NAME_MIN_LEN {
         is_valid = false;
         message = "username too short";
     }
-    if user_name.len() > 20 {
+    if user_name.chars().count() > USER_NAME_MAX_LEN {
         is_valid = false;
         message = "username too long";
     }
@@ -82,16 +90,16 @@ async fn validate_user_at(user_at: &str) -> ValidField {
         if c == '_' {
             return;
         }
-        if (!c.is_ascii_alphabetic() && !c.is_ascii_digit() && !is_brazilian(c)) || is_spanish(c) {
+        if (!c.is_ascii_alphanumeric() && !is_brazilian(c)) || is_spanish(c) {
             is_valid = false;
             message = "user_at invalid character";
         }
     });
-    if user_at.len() < 2 {
+    if user_at.len() < USER_AT_MIN_LEN {
         is_valid = false;
         message = "user_at too short";
     }
-    if user_at.len() > 20 {
+    if user_at.len() > USER_AT_MAX_LEN {
         is_valid = false;
         message = "user_at too long";
     }
@@ -128,16 +136,16 @@ async fn validate_password(password: &str) -> ValidField {
     let password = password.trim();
 
     password.chars().for_each(|c| {
-        if !c.is_alphanumeric() {
+        if (!c.is_ascii_alphanumeric() && !c.is_ascii_punctuation()) || c == ' ' {
             is_valid = false;
             message = "password invalid character";
         }
     });
-    if password.len() < 8 {
+    if password.len() < PASSWORD_MIN_LEN {
         is_valid = false;
         message = "password too short";
     }
-    if password.len() > 32 {
+    if password.len() > PASSWORD_MAX_LEN {
         is_valid = false;
         message = "password too long";
     }
