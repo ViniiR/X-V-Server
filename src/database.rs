@@ -7,7 +7,7 @@ use user::User;
 
 use crate::{
     auth::{hash::compare_password, Sub},
-    routes::types::ClientUser,
+    routes::{change::EditPostData, types::ClientUser},
 };
 
 pub mod user;
@@ -538,12 +538,24 @@ pub struct Post {
     pub commentscount: i32,
     pub unix_time: i64,
     pub post_id: i32,
+    pub edited: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Comment {
+    pub text: Option<String>,
+    pub image: Option<Vec<u8>>,
+    pub owner_id: i32,
+    pub likescount: i32,
+    pub commentscount: i32,
+    pub unix_time: i64,
+    pub post_id: i32,
 }
 
 pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts ORDER BY unix_time DESC"
+        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time, edited FROM posts ORDER BY unix_time DESC"
     )
     .fetch_all(pool)
     .await?;
@@ -553,9 +565,9 @@ pub async fn get_posts(pool: &Pool<Postgres>) -> Result<Vec<Post>, Error> {
 pub async fn get_comments_from_post(
     pool: &Pool<Postgres>,
     post_id: &i32,
-) -> Result<Vec<Post>, Error> {
+) -> Result<Vec<Comment>, Error> {
     let res = sqlx::query_as!(
-        Post,
+        Comment,
         "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM comments WHERE owner_post_id = $1 ORDER BY unix_time DESC",
         post_id
     )
@@ -567,7 +579,7 @@ pub async fn get_comments_from_post(
 pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE post_id = $1",
+        "SELECT text, edited, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE post_id = $1",
         post_id
     )
     .fetch_one(pool)
@@ -578,7 +590,7 @@ pub async fn get_post_by_id(pool: &Pool<Postgres>, post_id: &i32) -> Result<Post
 pub async fn get_user_posts(pool: &Pool<Postgres>, owner_id: &i32) -> Result<Vec<Post>, Error> {
     let res = sqlx::query_as!(
         Post,
-        "SELECT text, image, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE owner_id = $1 ORDER BY unix_time DESC",
+        "SELECT text, image, edited, owner_id, post_id, likescount, commentscount, unix_time FROM posts WHERE owner_id = $1 ORDER BY unix_time DESC",
         owner_id
     )
     .fetch_all(pool)
@@ -715,5 +727,21 @@ pub async fn delete_post(post_id: &i32, pool: &Pool<Postgres>) -> Result<(), Err
     sqlx::query!("DELETE FROM comments WHERE owner_post_id = $1", post_id)
         .execute(pool)
         .await?;
+    Ok(())
+}
+
+pub async fn edit_post(
+    post_id: &i32,
+    post_data: &EditPostData,
+    pool: &Pool<Postgres>,
+) -> Result<(), Error> {
+    sqlx::query!(
+        "UPDATE posts SET text = $2, image = $3, edited = true WHERE post_id = $1",
+        post_id,
+        post_data.text,
+        post_data.image.as_bytes()
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }

@@ -14,7 +14,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 
 use super::types::{DataResponse, UpdatedClientUser, UpdatedFollowData};
-use super::user::ResponsePost;
+use super::user::ResponseComment;
 
 #[get("/user/profile/<user_at>", format = "application/json")]
 pub async fn get_profile_data(
@@ -286,7 +286,7 @@ pub async fn query(query: &str) -> DataResponse<Result<Vec<UserWithIcon>, &'stat
 pub async fn fetch_comments(
     cookies: &CookieJar<'_>,
     post_id: i32,
-) -> DataResponse<Result<Vec<ResponsePost>, &'static str>> {
+) -> DataResponse<Result<Vec<ResponseComment>, &'static str>> {
     let pool = crate::database::connect_db().await;
 
     let Ok(posts) = crate::database::get_comments_from_post(&pool, &post_id).await else {
@@ -295,7 +295,7 @@ pub async fn fetch_comments(
             data: Json(Err("InternalServerError")),
         };
     };
-    let mut response_posts: Vec<ResponsePost> = vec![];
+    let mut response_posts: Vec<ResponseComment> = vec![];
 
     let mut owner_id: Option<i32> = None;
 
@@ -333,7 +333,7 @@ pub async fn fetch_comments(
             };
             c
         };
-        response_posts.push(ResponsePost {
+        response_posts.push(ResponseComment {
             has_this_user_liked,
             owner_id: p.owner_id,
             post_id: p.post_id,

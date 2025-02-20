@@ -322,3 +322,43 @@ pub async fn change_profile(
 
     Custom(Status::Ok, "Ok")
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EditPostData {
+    pub text: String,
+    pub image: String,
+}
+
+#[patch(
+    "/user/edit-post/<post_id>",
+    format = "application/json",
+    data = "<data>"
+)]
+pub async fn edit_post(
+    data: Json<EditPostData>,
+    post_id: i32,
+    cookies: &CookieJar<'_>,
+) -> Custom<&'static str> {
+    let jwt = cookies.get_private("auth_key");
+    if jwt.is_none() {
+        return Custom(Status::Forbidden, "forbidden");
+    }
+
+    let jwt = jwt.unwrap();
+
+    let Ok(s) = validate_jwt(jwt.value()).await else {
+        return Custom(Status::Forbidden, "forbidden");
+    };
+    let pool = database::connect_db().await;
+
+    if !database::user_has_credentials(&s, &pool).await {
+        return Custom(Status::Forbidden, "forbidden");
+    }
+
+    let data = data.into_inner();
+
+    if database::edit_post(&post_id, &data, &pool).await.is_err() {
+        return Custom(Status::InternalServerError, "InternalServerError");
+    }
+    Custom(Status::Ok, "post edited")
+}

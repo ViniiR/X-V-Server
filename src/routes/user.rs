@@ -211,6 +211,29 @@ pub async fn publish_post(
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct ResponseComment {
+    pub icon: String,
+    pub image: String,
+    #[serde(rename = "userName")]
+    pub username: String,
+    #[serde(rename = "userAt")]
+    pub user_at: String,
+    pub text: String,
+    #[serde(rename = "ownerId")]
+    pub owner_id: i32,
+    #[serde(rename = "likesCount")]
+    pub likes_count: i32,
+    #[serde(rename = "commentsCount")]
+    pub comments_count: i32,
+    #[serde(rename = "unixTime")]
+    pub unix_time: String,
+    #[serde(rename = "postId")]
+    pub post_id: i32,
+    #[serde(rename = "hasThisUserLiked")]
+    pub has_this_user_liked: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ResponsePost {
     pub icon: String,
     pub image: String,
@@ -231,8 +254,8 @@ pub struct ResponsePost {
     pub post_id: i32,
     #[serde(rename = "hasThisUserLiked")]
     pub has_this_user_liked: bool,
-    //#[serde(rename = "commentsCount")]
-    //pub comments_count: i32,
+    #[serde(rename = "edited")]
+    pub edited: bool,
 }
 
 #[get("/user/fetch-posts", format = "application/json")]
@@ -296,6 +319,7 @@ pub async fn fetch_posts(
             c
         };
         response_posts.push(ResponsePost {
+            edited: p.edited,
             has_this_user_liked,
             owner_id: p.owner_id,
             post_id: p.post_id,
@@ -379,6 +403,7 @@ pub async fn fetch_post(
         c
     };
     let response_post = ResponsePost {
+        edited: post.edited,
         has_this_user_liked,
         owner_id: post.owner_id,
         post_id: post.post_id,
@@ -477,6 +502,7 @@ pub async fn fetch_user_posts(
             c
         };
         response_posts.push(ResponsePost {
+            edited: p.edited,
             has_this_user_liked,
             owner_id: p.owner_id,
             post_id: p.post_id,
