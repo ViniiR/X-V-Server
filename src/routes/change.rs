@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     auth::{create_jwt, hash::hash_str, validate_jwt, Sub},
     database::{self, email_exists, user_exists, user_has_credentials, verify_password},
-    validate_email, validate_password, validate_user_at,
+    validate_email, validate_password, validate_user_at, validate_user_name, ValidField,
+    BIO_MAX_LEN,
 };
 
 use super::types::{EmailChangeData, PasswordChangeData, ProfileUpdate, UserAtChangeData};
@@ -281,16 +282,13 @@ pub async fn change_profile(
         return Custom(Status::Forbidden, "forbidden");
     };
 
-    if profile_data.bio.len() > 150 {
+    if profile_data.bio.chars().count() > BIO_MAX_LEN {
         return Custom(Status::BadRequest, "bio too long");
     }
 
-    if profile_data.username.len() > 20 {
-        return Custom(Status::BadRequest, "username too long");
-    }
-
-    if profile_data.username.len() < 2 {
-        return Custom(Status::BadRequest, "username too short");
+    let res: ValidField = validate_user_name(&profile_data.username).await;
+    if !res.valid {
+        return Custom(Status::BadRequest, res.message);
     }
 
     if !(crate::validate_user_name(&profile_data.username).await).valid {
