@@ -88,7 +88,7 @@ pub async fn change_email(
 
     let jwt = jwt.unwrap();
     let mut data = form_data.into_inner();
-    data.email = data.email.to_lowercase();
+    data.email = data.email.to_lowercase().trim().to_string();
 
     let valid_email = validate_email(&data.email).await;
     if !valid_email.valid {

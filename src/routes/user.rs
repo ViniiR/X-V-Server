@@ -51,8 +51,10 @@ pub async fn logout(cookies: &CookieJar<'_>) -> Custom<&'static str> {
 #[post("/user/create", format = "application/json", data = "<form_data>")]
 pub async fn create(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let mut data: User = form_data.into_inner();
-    data.email = data.email.to_lowercase();
-    data.user_at = data.user_at.to_lowercase();
+    data.email = data.email.to_lowercase().trim().to_string();
+    data.user_at = data.user_at.to_lowercase().trim().to_string();
+    data.password = data.password.trim().to_string();
+    data.user_name = data.user_name.trim().to_string();
 
     if let Err(e) = validate_minimal_user_credentials(&data).await {
         return e;
@@ -90,7 +92,8 @@ pub async fn create(form_data: Json<User>, cookies: &CookieJar<'_>) -> Custom<&'
 #[post("/user/login", format = "application/json", data = "<form_data>")]
 pub async fn login(form_data: Json<LoginData>, cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let mut data: LoginData = form_data.into_inner();
-    data.email = data.email.to_lowercase();
+    data.email = data.email.to_lowercase().trim().to_string();
+    data.password = data.password.trim().to_string();
 
     let res = validate_email(&data.email).await;
     if !res.valid {
