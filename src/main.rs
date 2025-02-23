@@ -194,6 +194,7 @@ async fn rocket() -> _ {
     rocket::custom(config).attach(cors::CORS).mount(
         "/",
         routes![
+            get_slash,
             routes::user::create,
             routes::user::login,
             routes::user::logout,
@@ -227,3 +228,8 @@ async fn rocket() -> _ {
 
 #[options("/<_..>")]
 async fn options() {}
+
+#[get("/")]
+async fn get_slash() -> Custom<&'static str> {
+    Custom(Status::NoContent, "OK")
+}
