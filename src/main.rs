@@ -231,5 +231,5 @@ async fn options() {}
 
 #[get("/")]
 async fn get_slash() -> Custom<&'static str> {
-    Custom(Status::NoContent, "OK")
+    Custom(Status::Ok, "OK")
 }

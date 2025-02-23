@@ -11,7 +11,7 @@ use crate::{
 #[get("/auth/validate")]
 pub async fn validate(cookies: &CookieJar<'_>) -> Custom<&'static str> {
     let Some(c) = cookies.get_private("auth_key") else {
-        return Custom(Status::Forbidden, "No credentials");
+        return Custom(Status::Unauthorized, "No credentials");
     };
 
     let Ok(_s) = validate_jwt(c.value()).await else {
